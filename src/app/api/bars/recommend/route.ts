@@ -233,7 +233,8 @@ export async function POST(req: NextRequest) {
     // 바가 5개 미만이면 10km로 확장 (지방 도시·바 밀도 낮은 지역 대응)
     if (bars.length < 5) {
       const fallbackDelta = 10 / 111;
-      const fallbackLngDelta = 10 / (111 * Math.cos((lat * Math.PI) / 180));
+      const fallbackCosLat = Math.cos((lat * Math.PI) / 180);
+      const fallbackLngDelta = fallbackCosLat > 0.001 ? 10 / (111 * fallbackCosLat) : 10 / 111;
       bars = await prisma.bar.findMany({
         where: {
           latitude: { gte: lat - fallbackDelta, lte: lat + fallbackDelta },
