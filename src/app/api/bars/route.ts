@@ -4,8 +4,8 @@ import { prisma } from "@/shared/lib/prisma";
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const area = searchParams.get("area");
-    const mood = searchParams.get("mood");
+    const area = searchParams.get("area")?.slice(0, 100);
+    const mood = searchParams.get("mood")?.slice(0, 30);
 
     const bars = await prisma.bar.findMany({
       where: {

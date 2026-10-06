@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getToken } from "next-auth/jwt";
+import { getUserId } from "@/server/auth/getUser";
 import { prisma } from "@/shared/lib/prisma";
 
 interface SaveBody {
@@ -18,14 +18,16 @@ interface SaveBody {
 }
 
 export async function POST(req: NextRequest) {
-  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-  const userId = (token?.id ?? token?.sub) as string | undefined;
+  const userId = (await getUserId(req)) ?? undefined;
   if (!userId) return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
 
   try {
     const body = await req.json() as SaveBody;
 
     const validMethods = ["shaking", "stirring", "build", "blending", "neat", "floating"];
+    if (typeof body !== "object" || body === null || typeof body.taste !== "object" || body.taste === null) {
+      return NextResponse.json({ error: "잘못된 요청입니다." }, { status: 400 });
+    }
     if (typeof body.name !== "string" || !body.name.trim() || body.name.length > 80) {
       return NextResponse.json({ error: "이름은 1~80자이어야 합니다." }, { status: 400 });
     }
@@ -37,8 +39,9 @@ export async function POST(req: NextRequest) {
     }
 
     const safeIngredients = body.ingredients.filter(
-      (ing) => typeof ing.name === "string" && ing.name.trim().length > 0 &&
-               isFinite(Number(ing.amount)) && Number(ing.amount) > 0
+      (ing) => typeof ing === "object" && ing !== null &&
+               typeof ing.name === "string" && ing.name.trim().length > 0 && ing.name.length <= 100 &&
+               isFinite(Number(ing.amount)) && Number(ing.amount) > 0 && Number(ing.amount) <= 10000
     );
     if (safeIngredients.length === 0) {
       return NextResponse.json({ error: "유효한 재료가 없습니다." }, { status: 400 });

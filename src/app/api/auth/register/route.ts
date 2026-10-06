@@ -1,14 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/shared/lib/prisma";
+import { checkSameOrigin } from "@/shared/lib/internalAuth";
+import { checkRateLimit, isRateLimitExemptEmail } from "@/shared/lib/rateLimit";
 
 export async function POST(req: NextRequest) {
+  const originError = checkSameOrigin(req);
+  if (originError) return originError;
+  const rateLimitError = await checkRateLimit(req, "register");
+  if (rateLimitError) return rateLimitError;
+
   try {
-    const { email, password, name } = await req.json() as {
-      email: string;
-      password: string;
-      name?: string;
-    };
+    const body = await req.json() as { email?: unknown; password?: unknown; name?: unknown };
+    const { password, name } = body;
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : body.email;
 
     if (typeof email !== "string" || typeof password !== "string" || !email || !password) {
       return NextResponse.json({ error: "이메일과 비밀번호를 입력하세요." }, { status: 400 });
@@ -16,21 +21,31 @@ export async function POST(req: NextRequest) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return NextResponse.json({ error: "올바른 이메일 형식을 입력하세요." }, { status: 400 });
     }
+    if (email.length > 254) {
+      return NextResponse.json({ error: "올바른 이메일 형식을 입력하세요." }, { status: 400 });
+    }
     if (password.length < 8) {
       return NextResponse.json({ error: "비밀번호는 8자 이상이어야 합니다." }, { status: 400 });
+    }
+    // bcrypt 는 72바이트 이후를 무시하고, 긴 입력은 CPU DoS 로 이어질 수 있음
+    if (Buffer.byteLength(password) > 72) {
+      return NextResponse.json({ error: "비밀번호는 72바이트 이하여야 합니다." }, { status: 400 });
     }
     if (name !== undefined && (typeof name !== "string" || name.length > 50)) {
       return NextResponse.json({ error: "이름은 50자 이하이어야 합니다." }, { status: 400 });
     }
 
-    const existing = await prisma.user.findUnique({ where: { email } });
+    // 이메일 미검증 가입으로 rate-limit 면제 이메일을 선점/사칭하지 못하도록 차단
+    const existing = isRateLimitExemptEmail(email)
+      ? true
+      : await prisma.user.findFirst({ where: { email: { equals: email, mode: "insensitive" } }, select: { id: true } });
     if (existing) {
       return NextResponse.json({ error: "이미 사용 중인 이메일입니다." }, { status: 409 });
     }
 
     const hashed = await bcrypt.hash(password, 12);
     const user = await prisma.user.create({
-      data: { email, password: hashed, name: name ?? null },
+      data: { email, password: hashed, name: typeof name === "string" ? name.trim() : null },
       select: { id: true, email: true, name: true },
     });
 

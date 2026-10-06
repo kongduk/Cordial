@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getToken } from "next-auth/jwt";
+import { getUserId } from "@/server/auth/getUser";
 import { prisma } from "@/shared/lib/prisma";
 
 const RATE = 0.12;
 
 export async function POST(req: NextRequest) {
-  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-  const userId = (token?.id ?? token?.sub) as string | undefined;
+  const userId = (await getUserId(req)) ?? undefined;
   if (!userId) return NextResponse.json({ ok: false });
 
   let cocktailId: string | undefined;
@@ -16,7 +15,7 @@ export async function POST(req: NextRequest) {
   } catch {
     return NextResponse.json({ ok: false });
   }
-  if (!cocktailId) return NextResponse.json({ ok: false });
+  if (typeof cocktailId !== "string" || !cocktailId || cocktailId.length > 64) return NextResponse.json({ ok: false });
 
   try {
     const [user, cocktail] = await Promise.all([

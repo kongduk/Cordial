@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getToken } from "next-auth/jwt";
 import { recommendCocktails } from "@/server/ai/recommendCocktails";
 import { prisma } from "@/shared/lib/prisma";
 import type { EmotionVector } from "@/shared/types";
-import { checkInternalSecret } from "@/shared/lib/internalAuth";
+import { checkSameOrigin } from "@/shared/lib/internalAuth";
+import { getAuthUser } from "@/server/auth/getUser";
 import { checkRateLimit } from "@/shared/lib/rateLimit";
 
 function isValidEmotionVector(v: unknown): v is EmotionVector {
@@ -18,12 +18,11 @@ function isValidEmotionVector(v: unknown): v is EmotionVector {
 }
 
 export async function POST(req: NextRequest) {
-  const authError = checkInternalSecret(req);
-  if (authError) return authError;
+  const originError = checkSameOrigin(req);
+  if (originError) return originError;
 
-  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-  const email = (token as { email?: string } | null)?.email;
-  const rateLimitError = await checkRateLimit(req, "recommend", email);
+  const authUser = await getAuthUser(req);
+  const rateLimitError = await checkRateLimit(req, "recommend", authUser?.email, authUser?.id);
   if (rateLimitError) return rateLimitError;
 
   try {
@@ -34,11 +33,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "유효하지 않은 emotionVector입니다." }, { status: 400 });
     }
 
-    const userId = (token?.id ?? token?.sub) as string | undefined;
+    const userId = authUser?.id;
 
     // 로그인 유저: drinkingCapacity를 DB에서 가져옴 (온보딩에서 이미 설정됨)
-    // 비로그인 유저: 감정 플로우 step 5에서 받은 값 사용
-    const drinkingCapacity = userId ? undefined : capacityFromBody;
+    // 비로그인 유저: 감정 플로우 step 5에서 받은 값 사용 (허용 값만)
+    const validCapacities = ["VERY_LOW", "LOW", "MEDIUM", "HIGH", "VERY_HIGH"];
+    const drinkingCapacity =
+      userId || typeof capacityFromBody !== "string" || !validCapacities.includes(capacityFromBody)
+        ? undefined
+        : capacityFromBody;
 
     const recommendations = await recommendCocktails({ emotionVector, userId, drinkingCapacity });
 

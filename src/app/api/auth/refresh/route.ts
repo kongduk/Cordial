@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { rotateRefreshToken } from "@/server/auth/tokens";
+import { checkSameOrigin } from "@/shared/lib/internalAuth";
 
 export async function POST(req: NextRequest) {
+  const originError = checkSameOrigin(req);
+  if (originError) return originError;
+
   const oldToken = req.cookies.get("cordial_refresh")?.value;
   if (!oldToken) return NextResponse.json({ error: "No refresh token" }, { status: 401 });
 

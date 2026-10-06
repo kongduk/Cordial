@@ -1,17 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getToken } from "next-auth/jwt";
 import { mixAnalyze } from "@/server/ai/mixAnalyze";
 import type { MixIngredient, MixMethod } from "@/shared/types";
-import { checkInternalSecret } from "@/shared/lib/internalAuth";
+import { checkSameOrigin } from "@/shared/lib/internalAuth";
+import { getAuthUser } from "@/server/auth/getUser";
 import { checkRateLimit } from "@/shared/lib/rateLimit";
 
 export async function POST(req: NextRequest) {
-  const authError = checkInternalSecret(req);
-  if (authError) return authError;
+  const originError = checkSameOrigin(req);
+  if (originError) return originError;
 
-  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-  const email = (token as { email?: string } | null)?.email;
-  const rateLimitError = await checkRateLimit(req, "mix-analyze", email);
+  const authUser = await getAuthUser(req);
+  const rateLimitError = await checkRateLimit(req, "mix-analyze", authUser?.email, authUser?.id);
   if (rateLimitError) return rateLimitError;
 
   try {
@@ -38,7 +37,7 @@ export async function POST(req: NextRequest) {
         isFinite(Number(i.amount)) && Number(i.amount) > 0 &&
         isFinite(Number(i.abv)) && Number(i.abv) >= 0 && Number(i.abv) <= 100
       )
-      .map(i => ({ name: i.name.trim(), amount: Number(i.amount), abv: Number(i.abv) }));
+      .map(i => ({ name: i.name.trim().slice(0, 50), amount: Math.min(Number(i.amount), 10000), abv: Number(i.abv) }));
 
     if (safeIngredients.length === 0) {
       return NextResponse.json({ error: "유효한 재료가 없습니다." }, { status: 400 });

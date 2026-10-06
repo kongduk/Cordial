@@ -1,13 +1,20 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { getAuthUser } from "@/server/auth/getUser";
+import { checkRateLimit } from "@/shared/lib/rateLimit";
 import { prisma } from "@/shared/lib/prisma";
 import { generateRecipeSteps } from "@/server/ai/generateRecipeSteps";
 
 export async function GET(
-  _req: Request,
+  req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  const authUser = await getAuthUser(req);
+  const rateLimitError = await checkRateLimit(req, "recipe-steps", authUser?.email, authUser?.id);
+  if (rateLimitError) return rateLimitError;
+
   try {
     const { id } = await context.params;
+    if (id.length > 64) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     const cocktail = await prisma.cocktail.findUnique({
       where: { id },
@@ -17,6 +24,10 @@ export async function GET(
     });
 
     if (!cocktail) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
+    if (cocktail.isCustom && cocktail.createdBy !== authUser?.id) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
