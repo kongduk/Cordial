@@ -87,17 +87,30 @@ model EmotionLog {
 현재 차원: `{ joy, sadness, stress, fatigue, excitement }` (0~1)
 (구버전 `happy/calm/excited/tired/stressed`는 완전 제거됨)
 
-## 추천 점수 공식
+## 추천 점수 공식 (src/server/ai/recommendCocktails.ts 와 일치)
 
-- **비로그인**: `(0.4 × 감정유사도 + 0.1 × 인기도) / 0.5`
-- **로그인**: `0.4×감정 + 0.2×취향 + 0.15×주량적합도 + 0.15×과거선호 + 0.1×인기도`
+- **비로그인**: `0.4×감정유사도 + 0.1×인기도 + 0.1×주량적합도 + 지터`
+- **로그인**: `0.4×감정 + 0.2×취향유사도(×0.2 가중 포함) + 0.15×주량적합도 + 0.15×최근 5개와의 차이(novelty) + 0.1×인기도 − 장기이력유사도(최대 0.1 가중, 반복 방지용 감점) + 지터`
+- 최근 5개 추천은 점수 ×0.3. 점수 상위 12개 후보풀에서 가중 랜덤으로 9개 샘플링.
+- 지터는 `JITTER_RANGE = 0.06` (상위 12 후보풀 점수 간격 ≈ 0.04 보다 작게 유지).
+- 감정 목표 벡터: `emotionToVector`(원점수 0~1) → `emotionToTarget`(실제 칵테일 분위수로 보정, `src/shared/lib/emotionTaste.ts`).
+  `FLAVOR_QUANTILES` 는 `npm run db:recompute-flavor` 출력으로 갱신.
+
+## 맛 모델 (src/shared/lib/flavorModel.ts) — 모든 맛/도수 숫자의 단일 출처
+
+- 시드, 재계산 스크립트, 모의 제조(`mixAnalyze`), 저장 API(`/api/cocktail/save`)가 모두 `computeFlavor` 를 사용. Gemini 는 이름/설명/향 텍스트만 쓴다.
+- 재료별 100ml 당 당(g)/산(g, 구연산 환산)/도수/쓴맛 지수 표 + 플래그(탄산/허브/시트러스/크림). 표에 없는 재료는 키워드 아키타입으로 근사하고 `unknown` 으로 반환.
+- `parseAmount`: cl/ml/oz/dash/tsp/barspoon/splash/top 등 → ml. "적당량"/가니시는 0 (플래그만 적용).
+- 최종 부피 = Σ부피 / (1−희석률). 최종 도수 = 기본 도수 × (1−희석률).
+- 정규화 앵커(고정, `FLAVOR_ANCHORS`): sweetness=체감 당도%/19, sourness=산%/1.7, bitterness=쓴맛지수/0.45, strength=ABV/40, freshness=탄산·시트러스·허브 비율 가중합.
+- 검증: `npm run test:flavor` (IBA 8종 순위, parseAmount, 팬트리 매칭). DB 재계산: `npm run db:recompute-flavor` (기본 DRY RUN, `--write` 로 반영).
 
 ## ABV 계산 (mix-analyze)
 
 ```
 기본도수 = Σ(용량 × 도수) / 전체용량
-최종도수 = 기본도수 × (1 - 희석률)
-희석률: shaking=0.30, stirring=0.225, build=0.125, blending=0.35, neat=0
+최종도수 = 기본도수 × (1 - 희석률)          # 최종 부피 = 전체용량 / (1 - 희석률)
+희석률(DILUTION_RATES): shaking=0.30, stirring=0.225, build=0.125, blending=0.35, floating=0.05, neat=0
 ```
 
 ## 주요 API Routes
@@ -151,7 +164,9 @@ NAVER_CLIENT_SECRET=    # FastAPI 전용
 npm run dev             # 개발 서버
 npx prisma generate     # Prisma 클라이언트 재생성
 npx prisma migrate dev  # DB 마이그레이션
-npm run db:seed         # IBA 칵테일 20개 + 재료 30개 시드
+npm run db:seed         # IBA 칵테일 + 재료 시드 (맛 벡터는 flavorModel 로 계산)
+npm run db:recompute-flavor  # 기존 칵테일 맛/ABV 재계산 (기본 dry-run, --write 로 반영)
+npm run test:flavor     # 맛 모델 / 팬트리 매칭 검증
 npm run db:seed-bars    # 벡스코 주변 바 8개 시드 (시연용)
 
 # FastAPI 바 파이프라인

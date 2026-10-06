@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { recommendCocktails } from "@/server/ai/recommendCocktails";
 import { prisma } from "@/shared/lib/prisma";
+import { emotionToTarget } from "@/shared/lib/emotionTaste";
 import type { EmotionVector } from "@/shared/types";
 import { checkSameOrigin } from "@/shared/lib/internalAuth";
 import { getAuthUser } from "@/server/auth/getUser";
@@ -65,13 +66,8 @@ export async function POST(req: NextRequest) {
 
       // 감정 기반 추론 flavor 벡터로 user prefs 점진적 업데이트 (α=0.1 이동평균)
       const e = emotionVector;
-      const inferredFlavor = {
-        sweetness: e.joy * 0.35 + e.sadness * 0.40 + (1 - e.excitement) * 0.15 + (1 - e.stress) * 0.10,
-        sourness:  e.excitement * 0.50 + e.joy * 0.25 + (1 - e.fatigue) * 0.25,
-        bitterness: e.stress * 0.45 + e.sadness * 0.30 + e.fatigue * 0.25,
-        strength:  e.stress * 0.40 + e.excitement * 0.35 + e.joy * 0.15 + (1 - e.fatigue) * 0.10,
-        freshness: (1 - e.stress) * 0.35 + (1 - e.fatigue) * 0.35 + e.excitement * 0.20 + (1 - e.sadness) * 0.10,
-      };
+      // 취향(User.*Pref)은 실제 칵테일 맛 스케일 — 분포 보정된 목표를 사용
+      const inferredFlavor = emotionToTarget(e);
       const user = await prisma.user.findUnique({ where: { id: userId }, select: { sweetPref: true, sourPref: true, bitterPref: true, strongPref: true, freshPref: true } });
       if (user) {
         const α = 0.12;
