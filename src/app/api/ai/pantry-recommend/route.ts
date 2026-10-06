@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { pantryRecommend } from "@/server/ai/pantryRecommend";
 import { checkSameOrigin } from "@/shared/lib/internalAuth";
 import { getAuthUser } from "@/server/auth/getUser";
-import { checkRateLimit, consumeAnonAiBudget } from "@/shared/lib/rateLimit";
+import { checkRateLimit, consumeAiBudget } from "@/shared/lib/rateLimit";
 import { readJsonBody } from "@/shared/lib/readJson";
 
 export async function POST(req: NextRequest) {
@@ -27,8 +27,11 @@ export async function POST(req: NextRequest) {
       .map((item) => item.trim().slice(0, 50))
       .slice(0, 100);
 
-    const budgetError = await consumeAnonAiBudget(!authUser);
-    if (budgetError) return budgetError;
+    // Gemini 는 재료가 2개 이상일 때만 호출된다 (pantryRecommend.ts)
+    if (validIngredients.length >= 2) {
+      const budgetError = await consumeAiBudget(req, !authUser);
+      if (budgetError) return budgetError;
+    }
 
     const userId = authUser?.id;
 

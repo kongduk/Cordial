@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/server/auth/getUser";
-import { checkRateLimit, consumeAnonAiBudget } from "@/shared/lib/rateLimit";
+import { checkRateLimit, consumeAiBudget } from "@/shared/lib/rateLimit";
 import { prisma } from "@/shared/lib/prisma";
 import { generateRecipeSteps } from "@/server/ai/generateRecipeSteps";
 
@@ -35,7 +35,7 @@ export async function GET(
       return NextResponse.json({ steps: cocktail.recipeSteps });
     }
 
-    const budgetError = await consumeAnonAiBudget(!authUser);
+    const budgetError = await consumeAiBudget(req, !authUser);
     if (budgetError) return budgetError;
 
     const steps = await generateRecipeSteps({

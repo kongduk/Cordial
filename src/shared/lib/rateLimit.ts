@@ -38,10 +38,13 @@ const LIMITS = {
   register: { requests: 10, window: "1 h" },
   login: { requests: 10, window: "15 m" },
   "login-ip": { requests: 30, window: "15 m" },
+  "login-email-global": { requests: 100, window: "15 m" },
   "public-read": { requests: 600, window: "10 m" },
   // 전역(서비스 전체) 일일 예산 — 유료 API(Google Places/Gemini) 비용 증폭 방지
   "bars-pipeline-global": { requests: envInt("BARS_PIPELINE_DAILY_BUDGET", 200), window: "1 d" },
   "ai-anon-global": { requests: envInt("AI_ANON_DAILY_BUDGET", 2000), window: "1 d" },
+  "ai-auth-global": { requests: envInt("AI_AUTH_DAILY_BUDGET", 5000), window: "1 d" },
+  "ai-per-ip": { requests: envInt("AI_PER_IP_DAILY", 300), window: "1 d" },
 } as const;
 
 type Endpoint = keyof typeof LIMITS;
@@ -167,10 +170,13 @@ export async function allowByKey(endpoint: Endpoint, identifier: string): Promis
   }
 }
 
-/** 전역 일일 예산 1회 소비. true = 허용. 프로덕션에서는 Redis 미설정/런타임 오류 모두 fail-closed (비용 보호). */
-export async function consumeGlobalBudget(endpoint: "bars-pipeline-global" | "ai-anon-global"): Promise<boolean> {
+/** 일일 예산 1회 소비 (기본 key "global"). true = 허용. 프로덕션에서는 Redis 미설정/런타임 오류 모두 fail-closed (비용 보호). */
+export async function consumeGlobalBudget(
+  endpoint: "bars-pipeline-global" | "ai-anon-global" | "ai-auth-global" | "ai-per-ip",
+  key = "global"
+): Promise<boolean> {
   try {
-    const { success } = await getLimiter(endpoint).limit("global");
+    const { success } = await getLimiter(endpoint).limit(key);
     return success;
   } catch (e) {
     console.error(`[rateLimit:${endpoint}]`, e);
@@ -179,14 +185,24 @@ export async function consumeGlobalBudget(endpoint: "bars-pipeline-global" | "ai
 }
 
 /**
- * 실제 Gemini 호출 직전에만 호출한다. 비로그인(isAnonymous)일 때 전역 일일 예산을 1회 소비하고,
+ * 실제 Gemini 호출 직전에만 호출한다. 모든 호출자에게 IP 별 일일 한도(ai-per-ip)를,
+ * 비로그인은 ai-anon-global / 로그인은 ai-auth-global 전역 일일 예산을 1회 소비한다.
  * 소진되었거나(프로덕션 장애 포함) 허용되지 않으면 429 응답, 아니면 null.
  */
-export async function consumeAnonAiBudget(isAnonymous: boolean): Promise<NextResponse | null> {
-  if (!isAnonymous) return null;
-  if (await consumeGlobalBudget("ai-anon-global")) return null;
+export async function consumeAiBudget(req: NextRequest, isAnonymous: boolean): Promise<NextResponse | null> {
+  if (!(await consumeGlobalBudget("ai-per-ip", `ip:${getClientIpKey(req)}`))) {
+    return NextResponse.json(
+      { error: "이 네트워크의 오늘 AI 이용 한도에 도달했습니다. 내일 다시 시도해 주세요." },
+      { status: 429 }
+    );
+  }
+  if (await consumeGlobalBudget(isAnonymous ? "ai-anon-global" : "ai-auth-global")) return null;
   return NextResponse.json(
-    { error: "오늘 비로그인 AI 이용 한도에 도달했습니다. 로그인하시거나 내일 다시 시도해 주세요." },
+    {
+      error: isAnonymous
+        ? "오늘 비로그인 AI 이용 한도에 도달했습니다. 로그인하시거나 내일 다시 시도해 주세요."
+        : "오늘 AI 이용 한도에 도달했습니다. 내일 다시 시도해 주세요.",
+    },
     { status: 429 }
   );
 }

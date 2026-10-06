@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
-import { signIn, useSession } from "next-auth/react";
+import { signIn, useSession, getSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import axios from "axios";
 import Link from "next/link";
 import { CordialLogo } from "@/shared/ui/CordialLogo";
 import { GlassSilhouette } from "@/shared/ui/GlassSilhouette";
 import { W, T } from "@/shared/lib/theme";
+import { ACCESS_TOKEN_KEY, ACCESS_TOKEN_USER_KEY } from "@/shared/lib/logout";
 
 type OAuthProvider = "google" | "naver";
 
@@ -93,7 +94,10 @@ function LoginContent() {
       } else {
         try {
           const { data } = await axios.post<{ accessToken: string }>("/api/auth/token");
-          localStorage.setItem("cordial_access_token", data.accessToken);
+          localStorage.setItem(ACCESS_TOKEN_KEY, data.accessToken);
+          // providers.tsx 가 재발급하지 않도록 토큰 소유 유저 id 도 함께 저장
+          const uid = ((await getSession())?.user as { id?: string } | undefined)?.id;
+          if (uid) localStorage.setItem(ACCESS_TOKEN_USER_KEY, uid);
         } catch { /* non-fatal */ }
         window.location.href = "/home";
       }

@@ -26,7 +26,7 @@ async function fetchNearbyBarsPage(
   lat: number,
   lng: number,
   pageToken?: string,
-): Promise<{ results: GooglePlace[]; nextToken?: string }> {
+): Promise<{ results: GooglePlace[]; nextToken?: string; status: string }> {
   const key = process.env.GOOGLE_MAPS_API_KEY;
   if (!key) throw new Error("GOOGLE_MAPS_API_KEY not configured");
 
@@ -37,18 +37,21 @@ async function fetchNearbyBarsPage(
   const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
   if (!res.ok) {
     console.error(`[barsPipeline] Google Places API HTTP ${res.status}`);
-    return { results: [] };
+    return { results: [], status: `HTTP_${res.status}` };
   }
   const data = (await res.json()) as GoogleNearbyResponse;
   if (data.status && data.status !== "OK" && data.status !== "ZERO_RESULTS") {
     console.error(`[barsPipeline] Google Places status: ${data.status}`);
   }
-  return { results: data.results ?? [], nextToken: data.next_page_token };
+  return { results: data.results ?? [], nextToken: data.next_page_token, status: data.status ?? "UNKNOWN_ERROR" };
 }
 
-async function fetchAllNearbyBars(lat: number, lng: number): Promise<GooglePlace[]> {
+async function fetchAllNearbyBars(
+  lat: number,
+  lng: number,
+): Promise<{ places: GooglePlace[]; firstStatus: string }> {
   const all: GooglePlace[] = [];
-  const { results, nextToken } = await fetchNearbyBarsPage(lat, lng);
+  const { results, nextToken, status: firstStatus } = await fetchNearbyBarsPage(lat, lng);
   all.push(...results);
 
   if (nextToken && all.length < 40) {
@@ -56,7 +59,7 @@ async function fetchAllNearbyBars(lat: number, lng: number): Promise<GooglePlace
     const { results: results2 } = await fetchNearbyBarsPage(lat, lng, nextToken);
     all.push(...results2);
   }
-  return all;
+  return { places: all, firstStatus };
 }
 
 async function fetchPlaceReviews(placeId: string): Promise<string[]> {
@@ -98,8 +101,9 @@ export async function countFreshNearbyBarsInDB(lat: number, lng: number): Promis
   });
 }
 
-export async function runInlinePipeline(lat: number, lng: number): Promise<void> {
-  const places = await fetchAllNearbyBars(lat, lng);
+/** 첫 페이지의 Places status 를 반환한다 (ZERO_RESULTS 일 때만 네거티브 캐시 대상). */
+export async function runInlinePipeline(lat: number, lng: number): Promise<string> {
+  const { places, firstStatus } = await fetchAllNearbyBars(lat, lng);
   console.log(`[barsPipeline] Google Places 수집: ${places.length}개`);
 
   const targets = places.slice(0, 20);
@@ -145,6 +149,7 @@ export async function runInlinePipeline(lat: number, lng: number): Promise<void>
     );
     if (i + 5 < targets.length) await new Promise((r) => setTimeout(r, 2000));
   }
+  return firstStatus;
 }
 
 // 동일 지역 동시 요청 합치기 + 전체 동시 실행 수 제한 (유료 Google/Gemini 호출 증폭 방지).
@@ -204,6 +209,10 @@ async function ensureFreshBarsUncoalesced(lat: number, lng: number): Promise<voi
     }
   }
 
-  await runInlinePipeline(lat, lng);
-  if ((await countFreshNearbyBarsInDB(lat, lng)) === 0) await markEmptyBarCell(cell);
+  const firstStatus = await runInlinePipeline(lat, lng);
+  if ((await countFreshNearbyBarsInDB(lat, lng)) === 0) {
+    // 오류(HTTP 실패/OVER_QUERY_LIMIT/REQUEST_DENIED 등)는 네거티브 캐시하지 않는다 — ZERO_RESULTS 만 기록
+    if (firstStatus === "ZERO_RESULTS") await markEmptyBarCell(cell);
+    else console.error(`[barsPipeline] 바 0개지만 Places status=${firstStatus} → 빈 셀로 기록하지 않음 (${cell})`);
+  }
 }
