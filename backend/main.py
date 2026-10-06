@@ -53,30 +53,35 @@ class BodySizeLimitMiddleware:
                 if too_big:
                     return await self._reject(send)
 
+        # body 를 상한까지 먼저 버퍼링한다. 초과하면 앱을 호출하기 전에 413 을 보내므로
+        # 응답 시작 이후 초과가 발견되어 413 을 못 보내는 경우가 없다. 이후 receive 래퍼로 재생한다.
+        chunks = []
         received = 0
-
-        async def limited_receive():
-            nonlocal received
+        while True:
             message = await receive()
-            if message["type"] == "http.request":
-                received += len(message.get("body", b""))
-                if received > _MAX_BODY_BYTES:
-                    raise _BodyTooLarge()
-            return message
+            if message["type"] == "http.disconnect":
+                return
+            if message["type"] != "http.request":
+                continue
+            chunk = message.get("body", b"")
+            received += len(chunk)
+            if received > _MAX_BODY_BYTES:
+                return await self._reject(send)
+            chunks.append(chunk)
+            if not message.get("more_body", False):
+                break
 
-        started = False
+        body = b"".join(chunks)
+        replayed = False
 
-        async def tracking_send(message):
-            nonlocal started
-            if message["type"] == "http.response.start":
-                started = True
-            await send(message)
+        async def replay_receive():
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            return await receive()  # 이후에는 클라이언트 disconnect 만 전달
 
-        try:
-            await self.app(scope, limited_receive, tracking_send)
-        except _BodyTooLarge:
-            if not started:
-                await self._reject(send)
+        await self.app(scope, replay_receive, send)
 
     @staticmethod
     async def _reject(send):
@@ -84,10 +89,6 @@ class BodySizeLimitMiddleware:
         await send({"type": "http.response.start", "status": 413,
                     "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
         await send({"type": "http.response.body", "body": body})
-
-
-class _BodyTooLarge(Exception):
-    pass
 
 
 app.add_middleware(BodySizeLimitMiddleware)

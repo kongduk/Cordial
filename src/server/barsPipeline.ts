@@ -1,5 +1,6 @@
 import { prisma } from "@/shared/lib/prisma";
 import { analyzeBar } from "@/server/ai/barAnalyze";
+import { consumeGlobalBudget } from "@/shared/lib/rateLimit";
 
 export const CACHE_TTL_DAYS = 7;
 export const NEARBY_RADIUS_M = 5000;
@@ -168,6 +169,12 @@ export async function ensureFreshBars(lat: number, lng: number): Promise<void> {
 async function ensureFreshBarsUncoalesced(lat: number, lng: number): Promise<void> {
   const freshCount = await countFreshNearbyBarsInDB(lat, lng);
   if (freshCount >= MIN_BARS_THRESHOLD) return;
+
+  // 전역 일일 예산 소진 시 갱신을 건너뛰고 DB 에 캐시된 바로 응답 (에러 아님)
+  if (!(await consumeGlobalBudget("bars-pipeline-global"))) {
+    console.warn("[barsPipeline] 일일 파이프라인 예산 소진 — 캐시된 DB 데이터로 응답");
+    return;
+  }
 
   const fastapiUrl = process.env.FASTAPI_URL;
   if (fastapiUrl) {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserId } from "@/server/auth/getUser";
 import { prisma } from "@/shared/lib/prisma";
+import { checkPublicRead, PUBLIC_CACHE_CONTROL } from "@/shared/lib/rateLimit";
 import { SYNONYMS } from "@/shared/lib/ingredientSynonyms";
 
 // 커스텀 칵테일에서만 쓰이는 재료(사용자 입력으로 생성됨)는 공개 검색에서 제외
@@ -17,6 +18,8 @@ export async function GET(req: NextRequest) {
   const q = (req.nextUrl.searchParams.get("q")?.trim() ?? "").slice(0, 50);
 
   const userId = (await getUserId(req)) ?? undefined;
+  const limited = await checkPublicRead(req, !userId);
+  if (limited) return limited;
 
   try {
     let globalResults: { id: string; name: string; nameEn: string | null; abv: number; category: string | null }[];
@@ -48,7 +51,11 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    if (!userId) return NextResponse.json(globalResults);
+    if (!userId) {
+      return NextResponse.json(globalResults, {
+        headers: { "Cache-Control": PUBLIC_CACHE_CONTROL, Vary: "Cookie, Authorization" },
+      });
+    }
 
     // Fetch user's stored ingredients (filtered by query if present)
     const userIngredients = await prisma.userIngredient.findMany({
@@ -72,7 +79,7 @@ export async function GET(req: NextRequest) {
       ...filtered,
     ];
 
-    return NextResponse.json(merged);
+    return NextResponse.json(merged, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     console.error("[ingredients search]", error);
     return NextResponse.json({ error: "재료 검색 중 오류가 발생했습니다." }, { status: 500 });

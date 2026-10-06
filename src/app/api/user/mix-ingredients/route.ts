@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
         update: { abv: safeAbv },
       });
       return true;
-    });
+    }, { maxWait: 5000, timeout: 15000 });
     if (!ok) return NextResponse.json({ error: "저장 가능한 재료 수를 초과했습니다." }, { status: 400 });
     return NextResponse.json({ ok: true });
   } catch (error) {

@@ -11,7 +11,7 @@ export interface AuthUser {
  * 검증된 신원만 반환한다 (요청 body/query의 userId는 절대 신뢰하지 않는다).
  * 1) Authorization: Bearer <access token> — jwt.verify(HS256, iss/aud/typ 검증)
  * 2) NextAuth 세션 쿠키 — getToken (서명/암호화 검증)
- * 둘 다 있으면 Bearer 의 sub 를 사용하고, 쿠키 사용자와 일치할 때만 email 을 채운다.
+ * 둘 다 있으면 쿠키(세션) 신원을 우선한다.
  */
 export async function getAuthUser(req: NextRequest): Promise<AuthUser | null> {
   const auth = req.headers.get("authorization");
@@ -34,10 +34,9 @@ export async function getAuthUser(req: NextRequest): Promise<AuthUser | null> {
     }
   }
 
-  if (bearer) {
-    return { id: bearer.sub, email: cookieId === bearer.sub ? cookieEmail : null };
-  }
+  // 둘 다 있고 서로 다르면 세션(쿠키) 신원을 우선한다.
   if (cookieId) return { id: cookieId, email: cookieEmail };
+  if (bearer) return { id: bearer.sub, email: null };
   return null;
 }
 

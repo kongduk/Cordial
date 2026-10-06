@@ -74,18 +74,28 @@ export async function POST(req: NextRequest) {
 
       // 전역 Ingredient 는 이름(대소문자 무시)으로 매칭만 하고 abv 등은 절대 수정하지 않는다.
       // 없는 이름만 새로 만들며, 커스텀 칵테일에서만 쓰이는 재료는 /api/ingredients/search 에서 제외된다.
+      const names = safeIngredients.map((ing) => ing.name.trim());
+      const found = await tx.ingredient.findMany({
+        where: { OR: names.map((name) => ({ name: { equals: name, mode: "insensitive" as const } })) },
+        select: { id: true, name: true },
+      });
+      const byLower = new Map<string, { id: string }>();
+      for (const f of found) if (!byLower.has(f.name.toLowerCase())) byLower.set(f.name.toLowerCase(), f);
+
       const ingredientRecords: { id: string }[] = [];
       for (const ing of safeIngredients) {
         const name = ing.name.trim();
-        const existing = await tx.ingredient.findFirst({ where: { name: { equals: name, mode: "insensitive" } } });
-        ingredientRecords.push(
-          existing ??
-            (await tx.ingredient.upsert({
-              where: { name },
-              create: { name, abv: isFinite(Number(ing.abv)) ? Math.min(100, Math.max(0, Number(ing.abv))) : 0 },
-              update: {},
-            }))
-        );
+        let rec = byLower.get(name.toLowerCase());
+        if (!rec) {
+          rec = await tx.ingredient.upsert({
+            where: { name },
+            create: { name, abv: isFinite(Number(ing.abv)) ? Math.min(100, Math.max(0, Number(ing.abv))) : 0 },
+            update: {},
+            select: { id: true },
+          });
+          byLower.set(name.toLowerCase(), rec);
+        }
+        ingredientRecords.push(rec);
       }
 
       return tx.cocktail.create({
@@ -111,7 +121,7 @@ export async function POST(req: NextRequest) {
           },
         },
       });
-    });
+    }, { maxWait: 5000, timeout: 15000 });
     if (!cocktail) {
       return NextResponse.json({ error: "저장 가능한 레시피 수를 초과했습니다." }, { status: 400 });
     }
