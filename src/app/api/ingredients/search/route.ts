@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserId } from "@/server/auth/getUser";
 import { prisma } from "@/shared/lib/prisma";
-import { checkPublicRead, PUBLIC_CACHE_CONTROL } from "@/shared/lib/rateLimit";
+import { checkPublicRead } from "@/shared/lib/rateLimit";
 import { SYNONYMS } from "@/shared/lib/ingredientSynonyms";
 
 // 커스텀 칵테일에서만 쓰이는 재료(사용자 입력으로 생성됨)는 공개 검색에서 제외
@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
 
     if (!userId) {
       return NextResponse.json(globalResults, {
-        headers: { "Cache-Control": PUBLIC_CACHE_CONTROL, Vary: "Cookie, Authorization" },
+        headers: { "Cache-Control": "private, max-age=60", Vary: "Cookie, Authorization" },
       });
     }
 

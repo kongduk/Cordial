@@ -3,7 +3,7 @@ import { mixAnalyze } from "@/server/ai/mixAnalyze";
 import type { MixIngredient, MixMethod } from "@/shared/types";
 import { checkSameOrigin } from "@/shared/lib/internalAuth";
 import { getAuthUser } from "@/server/auth/getUser";
-import { checkRateLimit } from "@/shared/lib/rateLimit";
+import { checkRateLimit, consumeAnonAiBudget } from "@/shared/lib/rateLimit";
 import { readJsonBody } from "@/shared/lib/readJson";
 
 export async function POST(req: NextRequest) {
@@ -47,6 +47,9 @@ export async function POST(req: NextRequest) {
     }
 
     const safeNotes = typeof notes === "string" ? notes.slice(0, 500) : undefined;
+
+    const budgetError = await consumeAnonAiBudget(!authUser);
+    if (budgetError) return budgetError;
 
     const result = await mixAnalyze(safeIngredients, method, safeNotes);
     return NextResponse.json(result);

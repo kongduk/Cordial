@@ -44,15 +44,6 @@ const LIMITS = {
   "ai-anon-global": { requests: envInt("AI_ANON_DAILY_BUDGET", 2000), window: "1 d" },
 } as const;
 
-/** 비로그인 요청에만 전역 일일 예산을 추가 적용하는 Gemini 엔드포인트 */
-const AI_ANON_ENDPOINTS: ReadonlySet<string> = new Set([
-  "analyze-emotion",
-  "recommend",
-  "pantry-recommend",
-  "mix-analyze",
-  "recipe-steps",
-]);
-
 type Endpoint = keyof typeof LIMITS;
 
 const limiterCache = new Map<Endpoint, Ratelimit>();
@@ -100,6 +91,69 @@ export function getClientIp(req: { headers: { get(name: string): string | null }
   return fromRight(req.headers.get("x-forwarded-for")) ?? req.headers.get("x-real-ip")?.trim() ?? "unknown";
 }
 
+/**
+ * IP 를 한도 키로 정규화한다. IPv4 는 그대로, IPv4-mapped IPv6(::ffff:a.b.c.d)는 IPv4 로,
+ * 그 외 IPv6 는 '::' 를 올바르게 확장한 뒤 앞 4개 hextet(/64)만 사용한다 (주소 회전 우회 방지).
+ * 해석할 수 없는 값은 소문자 원본을 그대로 반환한다.
+ */
+export function normalizeIpForRateLimit(raw: string): string {
+  let ip = raw.trim().toLowerCase();
+  if (ip.startsWith("[") && ip.includes("]")) ip = ip.slice(1, ip.indexOf("]"));
+  const zone = ip.indexOf("%");
+  if (zone >= 0) ip = ip.slice(0, zone);
+  if (!ip.includes(":")) return ip; // IPv4 / unknown
+
+  const parseV4 = (s: string): number[] | null => {
+    const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s);
+    if (!m) return null;
+    const o = m.slice(1).map(Number);
+    return o.every((n) => n <= 255) ? o : null;
+  };
+  const toGroups = (part: string): number[] | null => {
+    if (part === "") return [];
+    const out: number[] = [];
+    const items = part.split(":");
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (i === items.length - 1 && it.includes(".")) {
+        const v4 = parseV4(it);
+        if (!v4) return null;
+        out.push((v4[0] << 8) | v4[1], (v4[2] << 8) | v4[3]);
+      } else if (/^[0-9a-f]{1,4}$/.test(it)) {
+        out.push(parseInt(it, 16));
+      } else {
+        return null;
+      }
+    }
+    return out;
+  };
+
+  const halves = ip.split("::");
+  if (halves.length > 2) return ip;
+  const head = toGroups(halves[0]);
+  const tail = halves.length === 2 ? toGroups(halves[1]) : [];
+  if (!head || !tail) return ip;
+  let groups: number[];
+  if (halves.length === 2) {
+    const missing = 8 - head.length - tail.length;
+    if (missing < 1) return ip;
+    groups = [...head, ...Array<number>(missing).fill(0), ...tail];
+  } else {
+    groups = head;
+  }
+  if (groups.length !== 8) return ip;
+
+  if (groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff) {
+    return `${groups[6] >> 8}.${groups[6] & 255}.${groups[7] >> 8}.${groups[7] & 255}`;
+  }
+  return groups.slice(0, 4).map((g) => g.toString(16)).join(":") + "::/64";
+}
+
+/** 한도 식별자로 쓰는 클라이언트 IP 키 (IPv6 는 /64 로 정규화) */
+export function getClientIpKey(req: { headers: { get(name: string): string | null } }): string {
+  return normalizeIpForRateLimit(getClientIp(req));
+}
+
 /** 단순 키 기반 한도 체크 (로그인 등 비유료 경로). true = 허용. */
 export async function allowByKey(endpoint: Endpoint, identifier: string): Promise<boolean> {
   try {
@@ -107,31 +161,66 @@ export async function allowByKey(endpoint: Endpoint, identifier: string): Promis
     return success;
   } catch (e) {
     console.error(`[rateLimit:${endpoint}]`, e);
-    // Redis 미설정/장애 시 전체 로그인이 막히지 않도록 fail-open (유료 API 경로는 checkRateLimit 에서 fail-closed)
+    // 로그인/공개 읽기 같은 비유료 경로는 Redis 장애 시 서비스 전체가 막히지 않도록 모든 환경에서 fail-open.
+    // (유료 API 경로는 checkRateLimit 이 프로덕션 미설정 시 503, 전역 예산은 consumeGlobalBudget 이 프로덕션 장애 시 fail-closed)
     return true;
   }
 }
 
-/** 전역 일일 예산 1회 소비. true = 허용. 미설정(프로덕션)만 fail-closed, 일시 장애는 checkRateLimit 과 동일하게 허용. */
+/** 전역 일일 예산 1회 소비. true = 허용. 프로덕션에서는 Redis 미설정/런타임 오류 모두 fail-closed (비용 보호). */
 export async function consumeGlobalBudget(endpoint: "bars-pipeline-global" | "ai-anon-global"): Promise<boolean> {
   try {
     const { success } = await getLimiter(endpoint).limit("global");
     return success;
   } catch (e) {
     console.error(`[rateLimit:${endpoint}]`, e);
-    return !(isMisconfigured() && process.env.NODE_ENV === "production");
+    return process.env.NODE_ENV !== "production";
+  }
+}
+
+/**
+ * 실제 Gemini 호출 직전에만 호출한다. 비로그인(isAnonymous)일 때 전역 일일 예산을 1회 소비하고,
+ * 소진되었거나(프로덕션 장애 포함) 허용되지 않으면 429 응답, 아니면 null.
+ */
+export async function consumeAnonAiBudget(isAnonymous: boolean): Promise<NextResponse | null> {
+  if (!isAnonymous) return null;
+  if (await consumeGlobalBudget("ai-anon-global")) return null;
+  return NextResponse.json(
+    { error: "오늘 비로그인 AI 이용 한도에 도달했습니다. 로그인하시거나 내일 다시 시도해 주세요." },
+    { status: 429 }
+  );
+}
+
+const EMPTY_BAR_CELL_TTL_SECONDS = 24 * 60 * 60;
+
+/** 파이프라인이 바를 하나도 찾지 못한 격자 셀인지 (24h 네거티브 캐시). Redis 오류 시 false. */
+export async function isEmptyBarCell(cell: string): Promise<boolean> {
+  try {
+    return (await getRedis().get(`bars:empty:${cell}`)) !== null;
+  } catch (e) {
+    console.error("[rateLimit:bars-empty-cell]", e);
+    return false;
+  }
+}
+
+/** 바가 없는 격자 셀을 24h 동안 기억 */
+export async function markEmptyBarCell(cell: string): Promise<void> {
+  try {
+    await getRedis().set(`bars:empty:${cell}`, "1", { ex: EMPTY_BAR_CELL_TTL_SECONDS });
+  } catch (e) {
+    console.error("[rateLimit:bars-empty-cell]", e);
   }
 }
 
 /** 공개 읽기 API 용 느슨한 IP 한도 (비로그인 전용). 한도 초과 시 429 응답, 아니면 null. 장애 시 fail-open. */
 export async function checkPublicRead(req: NextRequest, isAnonymous: boolean): Promise<NextResponse | null> {
   if (!isAnonymous) return null;
-  if (await allowByKey("public-read", `ip:${getClientIp(req)}`)) return null;
+  if (await allowByKey("public-read", `ip:${getClientIpKey(req)}`)) return null;
   return NextResponse.json({ error: "요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요." }, { status: 429 });
 }
 
 /** 사용자와 무관한 공개 응답에만 사용 (비로그인일 때 CDN 캐시 허용) */
-export const PUBLIC_CACHE_CONTROL = "public, s-maxage=60, stale-while-revalidate=300";
+export const PUBLIC_CACHE_CONTROL = "public, max-age=0, s-maxage=60, stale-while-revalidate=300";
 
 function isMisconfigured(): boolean {
   return !process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -146,7 +235,7 @@ export async function checkRateLimit(
   if (isRateLimitExemptEmail(email)) return null;
 
   // 로그인 유저는 id/이메일 기준, 비로그인은 IP 기준
-  const identifier = email ?? (userId ? `uid:${userId}` : getClientIp(req));
+  const identifier = email ?? (userId ? `uid:${userId}` : getClientIpKey(req));
 
   let result: { success: boolean; limit: number; remaining: number; reset: number };
   try {
@@ -160,14 +249,6 @@ export async function checkRateLimit(
   }
 
   const { success, limit, remaining, reset } = result;
-  if (success && !email && !userId && AI_ANON_ENDPOINTS.has(endpoint)) {
-    if (!(await consumeGlobalBudget("ai-anon-global"))) {
-      return NextResponse.json(
-        { error: "오늘 비로그인 AI 이용 한도에 도달했습니다. 로그인하시거나 내일 다시 시도해 주세요." },
-        { status: 429 }
-      );
-    }
-  }
   if (!success) {
     return NextResponse.json(
       { error: "요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요." },

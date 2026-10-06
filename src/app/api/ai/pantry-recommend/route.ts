@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { pantryRecommend } from "@/server/ai/pantryRecommend";
 import { checkSameOrigin } from "@/shared/lib/internalAuth";
 import { getAuthUser } from "@/server/auth/getUser";
-import { checkRateLimit } from "@/shared/lib/rateLimit";
+import { checkRateLimit, consumeAnonAiBudget } from "@/shared/lib/rateLimit";
 import { readJsonBody } from "@/shared/lib/readJson";
 
 export async function POST(req: NextRequest) {
@@ -26,6 +26,9 @@ export async function POST(req: NextRequest) {
       .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
       .map((item) => item.trim().slice(0, 50))
       .slice(0, 100);
+
+    const budgetError = await consumeAnonAiBudget(!authUser);
+    if (budgetError) return budgetError;
 
     const userId = authUser?.id;
 
