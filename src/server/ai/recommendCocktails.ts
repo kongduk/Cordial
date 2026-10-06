@@ -1,5 +1,6 @@
 import { generateJsonText, parseGeminiJson, sanitizeLlmText } from "@/shared/lib/geminiClient";
 import { prisma } from "@/shared/lib/prisma";
+import { emotionToTarget } from "@/shared/lib/emotionTaste";
 import type { EmotionVector, CocktailVector, RecommendedCocktail } from "@/shared/types";
 
 const DESCRIPTION_PROMPT = `당신은 칵테일을 잘 아는 바텐더입니다.
@@ -14,34 +15,29 @@ const DESCRIPTION_PROMPT = `당신은 칵테일을 잘 아는 바텐더입니다
 - "을(를)", "이(가)" 같은 이중 조사 절대 금지
 - 반드시 JSON 배열로만 반환: ["설명1", "설명2", ...]`;
 
-function emotionToVector(e: EmotionVector): CocktailVector {
-  return {
-    // joy·sadness → sweet (comfort), low excitement → more sweet
-    sweetness: e.joy * 0.35 + e.sadness * 0.40 + (1 - e.excitement) * 0.15 + (1 - e.stress) * 0.10,
-    // excitement·joy → bright/sour, low fatigue → more sour
-    sourness: e.excitement * 0.50 + e.joy * 0.25 + (1 - e.fatigue) * 0.25,
-    // stress·sadness·fatigue → bitter
-    bitterness: e.stress * 0.45 + e.sadness * 0.30 + e.fatigue * 0.25,
-    // stress·excitement → strong, low fatigue → slightly stronger
-    strength: e.stress * 0.40 + e.excitement * 0.35 + e.joy * 0.15 + (1 - e.fatigue) * 0.10,
-    // low stress·fatigue → fresh, excitement → fresh
-    freshness: (1 - e.stress) * 0.35 + (1 - e.fatigue) * 0.35 + e.excitement * 0.20 + (1 - e.sadness) * 0.10,
-  };
-}
-
 function euclideanSim(a: CocktailVector, b: CocktailVector): number {
   const keys: (keyof CocktailVector)[] = ["sweetness", "sourness", "bitterness", "strength", "freshness"];
   const dist = Math.sqrt(keys.reduce((s, k) => s + (a[k] - b[k]) ** 2, 0));
   return 1 / (1 + dist);
 }
 
+/**
+ * 주량 적합도. strength 는 flavorModel 의 ABV/40 스케일 (IBA 79종 중앙값 ≈ 0.41, 최대 ≈ 0.92).
+ * 기준값은 이 분포에 맞춰 정했다 — 맛 모델 앵커가 바뀌면 같이 재조정할 것.
+ */
 function volumeFitScore(capacity: string, strength: number): number {
-  if (capacity === "VERY_LOW") return strength < 0.25 ? 1 : strength < 0.45 ? 0.5 : 0.1;
-  if (capacity === "LOW")      return strength < 0.4  ? 1 : strength < 0.6  ? 0.5 : 0.1;
-  if (capacity === "HIGH")     return strength > 0.6  ? 1 : strength > 0.4  ? 0.6 : 0.3;
-  if (capacity === "VERY_HIGH") return strength > 0.75 ? 1 : strength > 0.5 ? 0.6 : 0.3;
-  return 1 - Math.abs(strength - 0.5); // MEDIUM
+  if (capacity === "VERY_LOW") return strength < 0.2 ? 1 : strength < 0.35 ? 0.5 : 0.1;
+  if (capacity === "LOW")      return strength < 0.32 ? 1 : strength < 0.5  ? 0.5 : 0.1;
+  if (capacity === "HIGH")     return strength > 0.5  ? 1 : strength > 0.35 ? 0.6 : 0.3;
+  if (capacity === "VERY_HIGH") return strength > 0.62 ? 1 : strength > 0.45 ? 0.6 : 0.3;
+  return 1 - Math.abs(strength - 0.42); // MEDIUM
 }
+
+/**
+ * 점수 지터 폭(균일분포 전체 범위). 상위 12개 후보풀의 점수 간격(1위-12위 ≈ 0.04)보다 작게 유지해야
+ * 지터가 순위를 뒤집지 않고 동점 근처만 섞는다. 다양성은 후보풀 가중 샘플링이 담당.
+ */
+export const JITTER_RANGE = 0.06;
 
 // 한국어 받침 여부에 따라 조사 선택
 function josa(word: string, withBatchim: string, withoutBatchim: string): string {
@@ -122,24 +118,8 @@ export async function recommendCocktails({
     return true;
   });
 
-  const keys: (keyof CocktailVector)[] = ["sweetness", "sourness", "bitterness", "strength", "freshness"];
-
-  // Scale emotion-derived target to match actual cocktail vector distribution.
-  // emotionToVector outputs [0,1] per dimension, but cocktail vectors have much
-  // narrower ranges (e.g. sourness max ~0.37). Without scaling, cosine similarity
-  // ignores magnitude and always returns the same 3 cocktails regardless of emotion.
-  const maxPerDim = keys.reduce<Record<keyof CocktailVector, number>>(
-    (acc, k) => { acc[k] = Math.max(...cocktails.map(c => c[k])); return acc; },
-    { sweetness: 1, sourness: 1, bitterness: 1, strength: 1, freshness: 1 }
-  );
-  const rawTarget = emotionToVector(emotionVector);
-  const targetVector: CocktailVector = {
-    sweetness:  rawTarget.sweetness  * maxPerDim.sweetness,
-    sourness:   rawTarget.sourness   * maxPerDim.sourness,
-    bitterness: rawTarget.bitterness * maxPerDim.bitterness,
-    strength:   rawTarget.strength   * maxPerDim.strength,
-    freshness:  rawTarget.freshness  * maxPerDim.freshness,
-  };
+  // 감정 목표는 실제 칵테일 분포(분위수)에 맞춰 보정된 벡터 — emotionTaste.ts 참고
+  const targetVector: CocktailVector = emotionToTarget(emotionVector);
 
   const userPrefVector: CocktailVector | null = user
     ? {
@@ -164,11 +144,11 @@ export async function recommendCocktails({
   };
 
   const recentFive = uniquePastRecs.slice(0, 5);
-  const olderRecs = uniquePastRecs.slice(5); // 6번째 이후 기록: 장기 취향 신호
+  const olderRecs = uniquePastRecs.slice(5); // 6번째 이후 기록: 오래전에 본 것과 비슷한 칵테일은 감점 (장기 반복 방지)
 
   // 단기 novelty: 최근 5개와 다른 칵테일 우선
   const recentVector: CocktailVector | null = recentFive.length > 0 ? avgVector(recentFive) : null;
-  // 장기 취향: 오래된 추천 기록으로 선호 패턴 추출 (3개 이상일 때만 반영)
+  // 장기 이력: 오래된 추천 기록의 평균 벡터 (3개 이상일 때만 반영) — 점수에서 감점(-)으로 쓰인다
   const historyVector: CocktailVector | null = olderRecs.length >= 3 ? avgVector(olderRecs) : null;
 
   const recentIds = new Set(recentFive.map(r => r.cocktail.id));
@@ -186,7 +166,7 @@ export async function recommendCocktails({
 
       const emotionSim = euclideanSim(targetVector, cv);
       const popularity = c.popularity;
-      const jitter = (Math.random() - 0.5) * 0.30;
+      const jitter = (Math.random() - 0.5) * JITTER_RANGE;
 
       let score: number;
       if (user && userPrefVector) {

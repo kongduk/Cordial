@@ -3,6 +3,7 @@ dotenv.config();
 
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { computeFlavor, mapDbMethod } from "../src/shared/lib/flavorModel";
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
 const prisma = new PrismaClient({ adapter });
@@ -311,29 +312,14 @@ function lookupProfile(rawName: string): Profile | null {
   return P[n] ?? null;
 }
 
-function computeProfile(ings: { name: string; quantity: number | null }[]) {
-  let totalVol = 0, abvW = 0, swW = 0, soW = 0, biW = 0, frW = 0;
-  for (const ing of ings) {
-    const p = lookupProfile(ing.name);
-    if (!p) continue;
-    const vol = ing.quantity ?? 0.4; // garnishes get small weight
-    totalVol += vol;
-    abvW += p.abv * vol;
-    swW  += p.sw  * vol;
-    soW  += p.so  * vol;
-    biW  += p.bi  * vol;
-    frW  += p.fr  * vol;
-  }
-  if (totalVol === 0) return { abv: 15, sweetness: 0.3, sourness: 0.3, bitterness: 0.3, freshness: 0.3, strength: 0.4 };
-  const abv = abvW / totalVol;
-  return {
-    abv: Math.round(abv * 10) / 10,
-    sweetness: Math.min(swW / totalVol, 1),
-    sourness:  Math.min(soW / totalVol, 1),
-    bitterness:Math.min(biW / totalVol, 1),
-    freshness: Math.min(frW / totalVol, 1),
-    strength:  Math.min(abv / 42, 1),
-  };
+// 맛 벡터는 결정론적 flavorModel 로 계산 (재료 이름은 한국어 DB 표기로 변환, cl → ml)
+function computeProfile(ings: { name: string; quantity: number | null }[], method: string) {
+  const r = computeFlavor(
+    ings.map((i) => ({ name: ING_KO[normalize(i.name)] ?? i.name, ml: i.quantity != null ? i.quantity * 10 : 0 })),
+    mapDbMethod(method),
+  );
+  if (r.unknown.length > 0) console.warn(`  ⚠ flavorModel unknown ingredients: ${r.unknown.join(", ")}`);
+  return { abv: r.abv, sweetness: r.sweetness, sourness: r.sourness, bitterness: r.bitterness, freshness: r.freshness, strength: r.strength };
 }
 
 function mapCategory(type: string | null): string {
@@ -424,10 +410,10 @@ async function main() {
   // 4. Create cocktails + join records
   let cocktailCount = 0;
   for (const c of IBA_DATA) {
-    const profile = computeProfile(c.ingredients);
     const koName = KO_NAME[c.name] ?? c.name;
     const glass  = GLASS_MAP[c.name]  ?? "coupe";
     const method = METHOD_MAP[c.name] ?? "shaking";
+    const profile = computeProfile(c.ingredients, method);
     const pop    = POPULARITY_MAP[c.name] ?? 0.60;
 
     const cocktail = await prisma.cocktail.create({

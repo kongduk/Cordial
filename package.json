@@ -12,6 +12,8 @@
     "db:studio": "prisma studio",
     "db:generate": "prisma generate",
     "db:seed": "tsx prisma/seed.ts",
+    "db:recompute-flavor": "tsx prisma/recompute-flavor.ts",
+    "test:flavor": "tsx prisma/verify-flavor.ts",
     "db:fetch-images": "tsx prisma/fetch-images.ts",
     "db:fix-images": "tsx prisma/fix-images.ts",
     "db:check-missing": "tsx prisma/check-missing.ts",
