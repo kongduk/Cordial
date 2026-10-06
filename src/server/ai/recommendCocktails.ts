@@ -68,7 +68,7 @@ async function generateDescriptions(names: string[], emotion: EmotionVector): Pr
     ].filter(Boolean).join(", ") || "평온함";
 
     const prompt = `고객 감정: ${emotionSummary} (세부: ${JSON.stringify(emotion)})\n\n추천 칵테일 목록 (${names.length}개):\n${names.map((n, i) => `${i + 1}. ${n}`).join("\n")}\n\n위 ${names.length}개 칵테일 각각에 대해 2~3문장 추천 설명을 JSON 배열로 반환하세요.`;
-    const raw = await generateJsonText(prompt, DESCRIPTION_PROMPT, { maxOutputTokens: 2048 });
+    const raw = await generateJsonText(prompt, DESCRIPTION_PROMPT, { maxOutputTokens: 1024 });
     const parsed = parseGeminiJson<unknown>(raw);
 
     if (Array.isArray(parsed)) {
@@ -233,7 +233,11 @@ export async function recommendCocktails({
     selected.push(...remaining.splice(picked, 1));
   }
 
-  const descriptions = await generateDescriptions(selected.map(c => c.name), emotionVector);
+  // 설명 생성은 출력 길이에 비례해 느려지므로 3개씩 나눠 병렬 호출 (9개 일괄 ≈ 10s+ → ≈ 3~4s)
+  const names = selected.map(c => c.name);
+  const chunks: string[][] = [];
+  for (let i = 0; i < names.length; i += 3) chunks.push(names.slice(i, i + 3));
+  const descriptions = (await Promise.all(chunks.map(chunk => generateDescriptions(chunk, emotionVector)))).flat();
 
   return selected.map((c, i) => ({
     ...c,
