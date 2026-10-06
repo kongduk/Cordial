@@ -27,7 +27,7 @@ export async function GET(
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
-    if (cocktail.isCustom && cocktail.createdBy !== authUser?.id) {
+    if (cocktail.isCustom && (!authUser?.id || cocktail.createdBy !== authUser.id)) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 

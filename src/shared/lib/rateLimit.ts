@@ -59,15 +59,21 @@ export function isRateLimitExemptEmail(email: string | null | undefined): boolea
 }
 
 export function getClientIp(req: { headers: { get(name: string): string | null } }): string {
-  // Vercel 은 x-vercel-forwarded-for / x-real-ip / x-forwarded-for 를 실제 클라이언트 IP 로 덮어쓰므로
-  // 위조 불가한 x-vercel-forwarded-for 를 우선 사용하고, 로컬/기타 환경은 기존 헤더로 폴백한다.
   const first = (v: string | null) => v?.split(",")[0]?.trim() || undefined;
-  return (
-    first(req.headers.get("x-vercel-forwarded-for")) ??
-    first(req.headers.get("x-real-ip")) ??
-    first(req.headers.get("x-forwarded-for")) ??
-    "unknown"
-  );
+  const last = (v: string | null) => v?.split(",").pop()?.trim() || undefined;
+  // Vercel 은 x-vercel-forwarded-for / x-real-ip / x-forwarded-for 를 실제 클라이언트 IP 로 덮어쓰므로
+  // process.env.VERCEL 이 설정된 환경에서만 이 헤더들을 신뢰한다.
+  if (process.env.VERCEL) {
+    return (
+      first(req.headers.get("x-vercel-forwarded-for")) ??
+      first(req.headers.get("x-real-ip")) ??
+      first(req.headers.get("x-forwarded-for")) ??
+      "unknown"
+    );
+  }
+  // 자체 호스팅/로컬: 클라이언트가 보낸 헤더는 위조 가능하다. x-forwarded-for 의 첫 항목은 클라이언트가
+  // 임의로 넣을 수 있으므로, 가장 가까운 프록시가 덧붙인 마지막 항목(또는 x-real-ip)을 사용한다.
+  return last(req.headers.get("x-forwarded-for")) ?? req.headers.get("x-real-ip")?.trim() ?? "unknown";
 }
 
 /** 단순 키 기반 한도 체크 (로그인 등 비유료 경로). true = 허용. */
