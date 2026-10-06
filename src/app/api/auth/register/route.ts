@@ -5,6 +5,16 @@ import { checkSameOrigin } from "@/shared/lib/internalAuth";
 import { checkRateLimit, isRateLimitExemptEmail } from "@/shared/lib/rateLimit";
 import { readJsonBody } from "@/shared/lib/readJson";
 
+/** 선형 시간 이메일 형식 검사: 공백 없음, '@' 정확히 1개, 로컬/도메인 비어있지 않음, 도메인 중간에 '.' 존재 */
+function isValidEmailFormat(email: string): boolean {
+  if (/\s/.test(email)) return false;
+  const at = email.indexOf("@");
+  if (at < 1 || at !== email.lastIndexOf("@")) return false;
+  const domain = email.slice(at + 1);
+  const dot = domain.lastIndexOf(".");
+  return dot > 0 && dot < domain.length - 1;
+}
+
 export async function POST(req: NextRequest) {
   const originError = checkSameOrigin(req);
   if (originError) return originError;
@@ -21,10 +31,8 @@ export async function POST(req: NextRequest) {
     if (typeof email !== "string" || typeof password !== "string" || !email || !password) {
       return NextResponse.json({ error: "이메일과 비밀번호를 입력하세요." }, { status: 400 });
     }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return NextResponse.json({ error: "올바른 이메일 형식을 입력하세요." }, { status: 400 });
-    }
-    if (email.length > 254) {
+    // 길이 확인을 먼저, 형식 검사는 정규식 없이 선형 시간으로 (ReDoS 방지)
+    if (email.length > 254 || !isValidEmailFormat(email)) {
       return NextResponse.json({ error: "올바른 이메일 형식을 입력하세요." }, { status: 400 });
     }
     if (password.length < 8) {

@@ -1,3 +1,4 @@
+import { NextRequest, NextResponse } from "next/server";
 import NextAuth from "next-auth/next";
 import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
@@ -81,4 +82,19 @@ const handler = NextAuth({
   },
 });
 
-export { handler as GET, handler as POST };
+const MAX_AUTH_BODY_BYTES = 16 * 1024;
+
+// NextAuth 는 body 를 크기 제한 없이 파싱하므로, POST 는 Content-Length 를 필수로 하고 상한을 둔다.
+// (정상 signIn/signOut/callback 은 작은 form-urlencoded 요청이며 항상 Content-Length 를 가진다)
+async function guardedPost(req: NextRequest, ctx: { params: { nextauth: string[] } }) {
+  const raw = req.headers.get("content-length");
+  if (raw === null || !/^\d{1,10}$/.test(raw)) {
+    return NextResponse.json({ error: "Content-Length 헤더가 필요합니다." }, { status: 411 });
+  }
+  if (Number(raw) > MAX_AUTH_BODY_BYTES) {
+    return NextResponse.json({ error: "요청 본문이 너무 큽니다." }, { status: 413 });
+  }
+  return handler(req, ctx);
+}
+
+export { handler as GET, guardedPost as POST };
