@@ -4,12 +4,13 @@ import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { GlassGlyph } from "./GlassSilhouette";
 
+// 탭은 프로필 포함 6개로 제한 — "제조"(/mix)는 홈 화면의 보조 메뉴에서 접근
 const TABS = [
   { id: "home",      label: "홈",       glass: "martini"  as const, href: "/home" },
   { id: "emotion",   label: "추천",     glass: "coupe"    as const, href: "/emotion" },
   { id: "cocktails", label: "칵테일",   glass: "highball" as const, href: "/cocktails" },
   { id: "pantry",    label: "내 술장",  glass: "rocks"    as const, href: "/pantry" },
-  { id: "mix",       label: "제조",     glass: "flute"    as const, href: "/mix" },
+  { id: "bars",      label: "바",       glass: "martini"  as const, href: "/bars" },
 ] as const;
 
 const sans = '"Pretendard Variable","Pretendard",-apple-system,BlinkMacSystemFont,sans-serif';
@@ -32,9 +33,9 @@ export function MobileTabBar({ active }: { active?: string }) {
         const c = isActive ? "#B88752" : "rgba(245,239,230,0.38)";
         return (
           <Link key={t.id} href={t.href} style={{ textDecoration: "none" }}>
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "6px 10px" }}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "6px 8px", minHeight: 44, minWidth: 44, justifyContent: "center", boxSizing: "border-box" }}>
               <GlassGlyph type={t.glass} size={20} color={c} strokeWidth={1.4} />
-              <span style={{ fontSize: 9, color: c, fontWeight: isActive ? 600 : 500, fontFamily: sans }}>{t.label}</span>
+              <span style={{ fontSize: 11, color: c, fontWeight: isActive ? 600 : 500, fontFamily: sans }}>{t.label}</span>
             </div>
           </Link>
         );
@@ -42,10 +43,10 @@ export function MobileTabBar({ active }: { active?: string }) {
 
       {/* 프로필 탭 */}
       <Link href={session ? "/mypage" : "/login"} style={{ textDecoration: "none" }}>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "6px 10px" }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "6px 8px", minHeight: 44, minWidth: 44, justifyContent: "center", boxSizing: "border-box" }}>
           <ProfileIcon active={active === "mypage"} session={!!session} />
           <span style={{
-            fontSize: 9, fontWeight: active === "mypage" ? 600 : 500, fontFamily: sans,
+            fontSize: 11, fontWeight: active === "mypage" ? 600 : 500, fontFamily: sans,
             color: active === "mypage" ? "#B88752" : "rgba(245,239,230,0.38)",
           }}>
             {session ? "프로필" : "로그인"}

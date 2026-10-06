@@ -13,6 +13,7 @@ import type { GlassType } from "@/shared/ui/GlassSilhouette";
 import type { IngredientOption } from "@/shared/ui/IngredientSearch";
 import type { MixIngredient, MixMethod, MixAnalysisResult } from "@/shared/types";
 import { W, T } from "@/shared/lib/theme";
+import { getApiErrorMessage } from "@/shared/lib/apiError";
 
 const DILUTION: Record<string, number> = { shaking: 0.30, stirring: 0.225, build: 0.125, blending: 0.35, neat: 0, floating: 0.05 };
 
@@ -57,6 +58,8 @@ export default function MixPage() {
   const [savedId, setSavedId] = useState<string | null>(null);
   const [customName, setCustomName] = useState("나만의 칵테일");
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
+  const [saveErrorMsg, setSaveErrorMsg] = useState<string | null>(null);
+  const [ingNotice, setIngNotice] = useState<string | null>(null);
   const nextIdRef = useRef(INITIAL_INGS.length + 1);
 
   const totalVolume = ings.reduce((s, i) => s + i.amount, 0);
@@ -70,11 +73,12 @@ export default function MixPage() {
 
   async function saveIngredient(name: string, abv: number) {
     if (!isLoggedIn) return;
-    await fetch("/api/user/mix-ingredients", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, abv }),
-    }).catch(() => {});
+    try {
+      await api.post("/user/mix-ingredients", { name, abv });
+    } catch {
+      setIngNotice("재료를 내 목록에 저장하지 못했어요. 이번 조합에는 그대로 쓸 수 있어요.");
+      setTimeout(() => setIngNotice(null), 4000);
+    }
   }
 
   function addIng(item: IngredientOption | { name: string; abv: number; isCustom: true }) {
@@ -98,7 +102,7 @@ export default function MixPage() {
     mutationFn: () =>
       api.post<MixAnalysisResult>("/ai/mix-analyze", { ingredients: ings, method, notes }).then(r => r.data),
     onSuccess: (data) => { setResult(data); setCustomName(data.name); setSaveStatus("idle"); setSavedId(null); setAnalyzeError(null); },
-    onError: () => setAnalyzeError("분석 중 오류가 발생했습니다. 다시 시도해주세요."),
+    onError: (e: unknown) => setAnalyzeError(getApiErrorMessage(e, "분석 중 오류가 발생했어요. 다시 시도해 주세요.")),
   });
 
   const loading = analyzeMutation.isPending;
@@ -117,9 +121,9 @@ export default function MixPage() {
         abv: result.calculatedAbv,
       }).then(r => r.data);
     },
-    onMutate: () => setSaveStatus("saving"),
+    onMutate: () => { setSaveStatus("saving"); setSaveErrorMsg(null); },
     onSuccess: (data) => { setSavedId(data.id); setSaveStatus("saved"); void queryClient.invalidateQueries({ queryKey: ["cocktails"] }); },
-    onError: () => setSaveStatus("error"),
+    onError: (e: unknown) => { setSaveStatus("error"); setSaveErrorMsg(getApiErrorMessage(e, "저장하지 못했어요.")); },
   });
 
   function saveRecipe() { saveMutation.mutate(); }
@@ -240,9 +244,12 @@ export default function MixPage() {
                           </div>
                         </Link>
                       ) : (
-                        <button onClick={saveRecipe} disabled={saveStatus === "saving"} style={{ width: "100%", padding: "12px", borderRadius: 10, border: `0.5px solid ${W.accent}`, background: "transparent", fontSize: 13, color: W.accent, fontFamily: W.sans, cursor: saveStatus === "saving" ? "not-allowed" : "pointer", opacity: saveStatus === "saving" ? 0.6 : 1 }}>
+                        <>
+                          <button onClick={saveRecipe} disabled={saveStatus === "saving"} style={{ width: "100%", padding: "12px", borderRadius: 10, border: `0.5px solid ${W.accent}`, background: "transparent", fontSize: 13, color: W.accent, fontFamily: W.sans, cursor: saveStatus === "saving" ? "not-allowed" : "pointer", opacity: saveStatus === "saving" ? 0.6 : 1 }}>
                           {saveStatus === "saving" ? "저장 중..." : saveStatus === "error" ? "저장 실패 — 다시 시도" : "레시피 저장하기"}
                         </button>
+                          {saveStatus === "error" && saveErrorMsg && <p role="alert" style={{ fontSize: 12, color: W.textMuted, margin: "6px 0 0", textAlign: "center", fontFamily: W.sans }}>{saveErrorMsg}</p>}
+                        </>
                       )
                     ) : (
                       <Link href="/login" style={{ textDecoration: "none" }}>
@@ -307,6 +314,7 @@ export default function MixPage() {
                 {loading ? "분석 중..." : "AI 분석하기"}
               </button>
               {analyzeError && <p style={{ fontSize: 12, color: "#D32F2F", margin: "8px 0 0", textAlign: "center", fontFamily: W.sans }}>{analyzeError}</p>}
+              {ingNotice && <p style={{ fontSize: 12, color: W.textMuted, margin: "8px 0 0", textAlign: "center", fontFamily: W.sans }}>{ingNotice}</p>}
             </div>
           </div>
         </div>
@@ -398,9 +406,12 @@ export default function MixPage() {
                       </div>
                     </Link>
                   ) : (
-                    <button onClick={saveRecipe} disabled={saveStatus === "saving"} style={{ width: "100%", padding: "12px", borderRadius: 10, border: `0.5px solid ${T.accent}`, background: "transparent", fontSize: 13, color: T.accent, fontFamily: T.sans, cursor: saveStatus === "saving" ? "not-allowed" : "pointer", opacity: saveStatus === "saving" ? 0.6 : 1 }}>
+                    <>
+                      <button onClick={saveRecipe} disabled={saveStatus === "saving"} style={{ width: "100%", padding: "12px", borderRadius: 10, border: `0.5px solid ${T.accent}`, background: "transparent", fontSize: 13, color: T.accent, fontFamily: T.sans, cursor: saveStatus === "saving" ? "not-allowed" : "pointer", opacity: saveStatus === "saving" ? 0.6 : 1 }}>
                       {saveStatus === "saving" ? "저장 중..." : saveStatus === "error" ? "저장 실패 — 다시 시도" : "레시피 저장하기"}
                     </button>
+                      {saveStatus === "error" && saveErrorMsg && <p role="alert" style={{ fontSize: 12, color: T.darkTextMuted, margin: "6px 0 0", textAlign: "center", fontFamily: T.sans }}>{saveErrorMsg}</p>}
+                    </>
                   )
                 ) : (
                   <Link href="/login" style={{ textDecoration: "none" }}>
@@ -422,6 +433,7 @@ export default function MixPage() {
               {loading ? "분석 중..." : "AI 분석하기"}
             </button>
             {analyzeError && <p style={{ fontSize: 12, color: "#EF9A9A", margin: "8px 0 0", textAlign: "center", fontFamily: T.sans }}>{analyzeError}</p>}
+            {ingNotice && <p style={{ fontSize: 12, color: T.darkTextMuted, margin: "8px 0 0", textAlign: "center", fontFamily: T.sans }}>{ingNotice}</p>}
           </div>
 
           <MobileTabBar active="mix" />

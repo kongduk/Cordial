@@ -44,7 +44,10 @@ api.interceptors.response.use(
         original.headers.Authorization = `Bearer ${newToken}`;
         return api(original);
       }
-      if (typeof window !== "undefined") window.location.href = "/login";
+      if (typeof window !== "undefined") {
+        const here = window.location.pathname + window.location.search;
+        window.location.href = here.startsWith("/login") ? "/login" : `/login?callbackUrl=${encodeURIComponent(here)}`;
+      }
     }
     return Promise.reject(error);
   }

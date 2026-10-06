@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import api from "@/shared/lib/api";
+import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
 import { GlassSilhouette } from "@/shared/ui/GlassSilhouette";
 import { WebNav } from "@/shared/ui/WebNav";
@@ -165,6 +166,7 @@ export default function CocktailDetailPage() {
   const [isCustom, setIsCustom] = useState(false);
   const [aiSteps, setAiSteps] = useState<string[] | null>(null);
   const [stepsLoading, setStepsLoading] = useState(false);
+  const [notFound, setNotFound] = useState<"cocktail" | "creative" | null>(null);
 
   const loadAiSteps = useCallback(async (id: string) => {
     if (!id || id === "creative") return;
@@ -183,6 +185,7 @@ export default function CocktailDetailPage() {
     let cancelled = false;
     const sel = typeof window !== "undefined" ? sessionStorage.getItem("selectedCocktail") : null;
     const targetId = urlId;
+    const fail = () => { if (!cancelled) setNotFound(targetId === "creative" ? "creative" : "cocktail"); };
 
     async function loadDetail(id: string) {
       try {
@@ -225,8 +228,8 @@ export default function CocktailDetailPage() {
                 bitterness: data.bitterness, strength: data.strength, freshness: data.freshness,
                 popularity: data.popularity, aiDescription: "", score: 0,
               });
-            } else { router.back(); }
-          } else { router.back(); }
+            } else { fail(); }
+          } else { fail(); }
           setLoading(false);
           return;
         }
@@ -265,17 +268,40 @@ export default function CocktailDetailPage() {
           });
           void loadAiSteps(targetId);
         } else {
-          router.back();
+          fail();
         }
       } else {
-        router.back();
+        fail();
       }
       if (!cancelled) setLoading(false);
     }
 
     init();
     return () => { cancelled = true; };
-  }, [router, urlId]);
+  }, [loadAiSteps, urlId]);
+
+  if (notFound) {
+    const toPantry = notFound === "creative";
+    return (
+      <>
+        <div className="cordial-web" style={{ background: W.bg, minHeight: "100dvh", fontFamily: W.sans, display: "flex", flexDirection: "column" }}>
+          <WebNav />
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: "0 24px" }}>
+            <h2 style={{ fontSize: 22, fontWeight: 500, letterSpacing: -0.4, margin: 0, color: W.text }}>칵테일을 찾을 수 없어요</h2>
+            <p style={{ fontSize: 14, color: W.textMuted, margin: 0, textAlign: "center" }}>{toPantry ? "AI가 만든 칵테일 정보가 사라졌어요. 내 술장에서 다시 찾아보세요." : "삭제되었거나 잘못된 주소일 수 있어요."}</p>
+            <Link href={toPantry ? "/pantry" : "/cocktails"} style={{ marginTop: 8, padding: "12px 24px", borderRadius: 12, background: W.accent, color: W.bg, fontSize: 14, fontWeight: 600, textDecoration: "none" }}>{toPantry ? "내 술장으로" : "칵테일 목록으로"}</Link>
+          </div>
+        </div>
+        <div className="cordial-mob">
+          <div style={{ width: "100%", minHeight: "100dvh", background: T.darkBg, color: T.darkText, fontFamily: T.sans, maxWidth: 430, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: "0 32px" }}>
+            <h2 style={{ fontSize: 22, fontWeight: 500, letterSpacing: -0.4, margin: 0 }}>칵테일을 찾을 수 없어요</h2>
+            <p style={{ fontSize: 14, color: T.darkTextMuted, margin: 0, textAlign: "center" }}>{toPantry ? "AI가 만든 칵테일 정보가 사라졌어요. 내 술장에서 다시 찾아보세요." : "삭제되었거나 잘못된 주소일 수 있어요."}</p>
+            <Link href={toPantry ? "/pantry" : "/cocktails"} style={{ marginTop: 8, padding: "12px 24px", borderRadius: 14, background: T.accent, color: T.darkBg, fontSize: 14, fontWeight: 600, textDecoration: "none" }}>{toPantry ? "내 술장으로" : "칵테일 목록으로"}</Link>
+          </div>
+        </div>
+      </>
+    );
+  }
 
   if (!cocktail || loading) {
     return (

@@ -64,33 +64,67 @@ export default function LoginPage() {
   );
 }
 
+/** callbackUrl 은 같은 사이트 내부 경로("/"로 시작, "//" 아님)만 허용 */
+function safeCallbackUrl(value: string | null): string {
+  if (value && value.startsWith("/") && !value.startsWith("//") && !value.startsWith("/\\")) return value;
+  return "/home";
+}
+
+interface PasswordFieldProps {
+  value: string;
+  onChange: (v: string) => void;
+  show: boolean;
+  onToggle: () => void;
+  inputStyle: React.CSSProperties;
+  toggleColor: string;
+}
+
+function PasswordField({ value, onChange, show, onToggle, inputStyle, toggleColor }: PasswordFieldProps) {
+  return (
+    <div style={{ position: "relative" }}>
+      <input type={show ? "text" : "password"} autoComplete="current-password" placeholder="비밀번호" value={value}
+        onChange={e => onChange(e.target.value)} required style={{ ...inputStyle, paddingRight: 56 }} />
+      <button type="button" onClick={onToggle} aria-label={show ? "비밀번호 숨기기" : "비밀번호 보기"}
+        style={{ position: "absolute", right: 4, top: 0, bottom: 0, minWidth: 44, background: "none", border: "none", cursor: "pointer", fontSize: 12, color: toggleColor, fontFamily: "inherit" }}>
+        {show ? "숨기기" : "보기"}
+      </button>
+    </div>
+  );
+}
+
 function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const errorParam = searchParams.get("error");
+  const callbackUrl = safeCallbackUrl(searchParams.get("callbackUrl"));
+  const registered = searchParams.get("registered") === "1";
   // credentials 실패는 NextAuth 에러 페이지로 오지 않으므로(redirect:false) 여기 오는 error 는 OAuth 계열
   const oauthError = errorParam ? (OAUTH_ERROR_MESSAGES[errorParam] ?? OAUTH_ERROR_GENERIC) : null;
   const { status } = useSession();
 
   useEffect(() => {
-    if (status === "authenticated") router.replace("/home");
-  }, [status, router]);
+    if (status === "authenticated") router.replace(callbackUrl);
+  }, [status, router, callbackUrl]);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [formError, setError] = useState<string | null>(null);
   const error = formError ?? oauthError;
+  const [credentialsFailed, setCredentialsFailed] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState<OAuthProvider | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setCredentialsFailed(false);
     setLoading(true);
     try {
-      const result = await signIn("credentials", { email, password, redirect: false, callbackUrl: "/home" });
+      const result = await signIn("credentials", { email, password, redirect: false, callbackUrl });
       if (result?.error) {
         setError("이메일 또는 비밀번호가 올바르지 않습니다.");
+        setCredentialsFailed(true);
       } else {
         try {
           const { data } = await axios.post<{ accessToken: string }>("/api/auth/token");
@@ -99,7 +133,7 @@ function LoginContent() {
           const uid = ((await getSession())?.user as { id?: string } | undefined)?.id;
           if (uid) localStorage.setItem(ACCESS_TOKEN_USER_KEY, uid);
         } catch { /* non-fatal */ }
-        window.location.href = "/home";
+        window.location.href = callbackUrl;
       }
     } catch {
       setError("네트워크 오류가 발생했습니다.");
@@ -111,7 +145,7 @@ function LoginContent() {
   function handleOAuth(provider: OAuthProvider) {
     if (oauthLoading) return;
     setOauthLoading(provider);
-    signIn(provider, { callbackUrl: "/home" });
+    signIn(provider, { callbackUrl });
   }
 
   /* ─────────────────────── WEB ─────────────────────── */
@@ -201,12 +235,18 @@ function LoginContent() {
               <div style={{ flex: 1, height: 0.5, background: W.border }} />
             </div>
 
+            {registered && (
+              <p role="status" style={{ fontSize: 12, color: "#2E7D32", background: "rgba(46,125,50,0.08)", borderRadius: 8, padding: "10px 12px", margin: "0 0 12px" }}>
+                가입이 완료됐어요. 로그인해 주세요.
+              </p>
+            )}
             <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-              <input type="email" placeholder="이메일" value={email} onChange={e => setEmail(e.target.value)} required
+              <input type="email" autoComplete="email" placeholder="이메일" value={email} onChange={e => setEmail(e.target.value)} required
                 style={{ height: 44, borderRadius: 10, border: `0.5px solid ${W.borderStrong}`, background: W.surface, color: W.text, fontSize: 13, fontFamily: W.sans, padding: "0 14px", outline: "none", width: "100%", boxSizing: "border-box" }} />
-              <input type="password" autoComplete="current-password" placeholder="비밀번호" value={password} onChange={e => setPassword(e.target.value)} required
-                style={{ height: 44, borderRadius: 10, border: `0.5px solid ${W.borderStrong}`, background: W.surface, color: W.text, fontSize: 13, fontFamily: W.sans, padding: "0 14px", outline: "none", width: "100%", boxSizing: "border-box" }} />
-              {error && <p style={{ fontSize: 12, color: "#D32F2F", margin: 0 }}>{error}</p>}
+              <PasswordField value={password} onChange={setPassword} show={showPassword} onToggle={() => setShowPassword(v => !v)} toggleColor={W.textMuted}
+                inputStyle={{ height: 44, borderRadius: 10, border: `0.5px solid ${W.borderStrong}`, background: W.surface, color: W.text, fontSize: 13, fontFamily: W.sans, padding: "0 14px", outline: "none", width: "100%", boxSizing: "border-box" }} />
+              {error && <p role="alert" style={{ fontSize: 12, color: "#D32F2F", margin: 0 }}>{error}</p>}
+              {credentialsFailed && <p style={{ fontSize: 12, color: W.textMuted, margin: 0 }}>여러 번 실패하면 잠시 로그인이 제한될 수 있어요.</p>}
               <button type="submit" disabled={loading}
                 style={{ height: 44, borderRadius: 10, background: W.text, color: W.bg, border: "none", fontSize: 13, fontWeight: 600, fontFamily: W.sans, cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.7 : 1, marginTop: 2 }}>
                 {loading ? "로그인 중..." : "이메일로 로그인"}
@@ -261,12 +301,18 @@ function LoginContent() {
               <div style={{ flex: 1, height: 0.5, background: T.darkBorder }} />
             </div>
 
+            {registered && (
+              <p role="status" style={{ fontSize: 13, color: "#A5D6A7", background: "rgba(165,214,167,0.1)", borderRadius: 10, padding: "10px 14px", margin: "0 0 12px" }}>
+                가입이 완료됐어요. 로그인해 주세요.
+              </p>
+            )}
             <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <input type="email" placeholder="이메일" value={email} onChange={e => setEmail(e.target.value)} required
+              <input type="email" autoComplete="email" placeholder="이메일" value={email} onChange={e => setEmail(e.target.value)} required
                 style={{ height: 48, borderRadius: 12, border: `0.5px solid ${T.darkBorderStrong}`, background: T.darkSurface, color: T.darkText, fontSize: 14, fontFamily: T.sans, padding: "0 16px", outline: "none", width: "100%", boxSizing: "border-box", letterSpacing: -0.1 }} />
-              <input type="password" autoComplete="current-password" placeholder="비밀번호" value={password} onChange={e => setPassword(e.target.value)} required
-                style={{ height: 48, borderRadius: 12, border: `0.5px solid ${T.darkBorderStrong}`, background: T.darkSurface, color: T.darkText, fontSize: 14, fontFamily: T.sans, padding: "0 16px", outline: "none", width: "100%", boxSizing: "border-box", letterSpacing: -0.1 }} />
-              {error && <p style={{ fontSize: 13, color: "#EF9A9A", margin: 0, letterSpacing: -0.1 }}>{error}</p>}
+              <PasswordField value={password} onChange={setPassword} show={showPassword} onToggle={() => setShowPassword(v => !v)} toggleColor={T.darkTextMuted}
+                inputStyle={{ height: 48, borderRadius: 12, border: `0.5px solid ${T.darkBorderStrong}`, background: T.darkSurface, color: T.darkText, fontSize: 14, fontFamily: T.sans, padding: "0 16px", outline: "none", width: "100%", boxSizing: "border-box", letterSpacing: -0.1 }} />
+              {error && <p role="alert" style={{ fontSize: 13, color: "#EF9A9A", margin: 0, letterSpacing: -0.1 }}>{error}</p>}
+              {credentialsFailed && <p style={{ fontSize: 12, color: T.darkTextMuted, margin: 0, letterSpacing: -0.1 }}>여러 번 실패하면 잠시 로그인이 제한될 수 있어요.</p>}
               <button type="submit" disabled={loading}
                 style={{ height: 48, borderRadius: 12, background: T.accent, color: T.darkBg, border: "none", fontSize: 15, fontWeight: 600, fontFamily: T.sans, cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.7 : 1, letterSpacing: -0.2, marginTop: 4 }}>
                 {loading ? "로그인 중..." : "로그인"}

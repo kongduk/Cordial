@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import api from "@/shared/lib/api";
+import { getApiErrorMessage } from "@/shared/lib/apiError";
 import { useRouter } from "next/navigation";
 import { WebNav } from "@/shared/ui/WebNav";
 import { GlassSilhouette } from "@/shared/ui/GlassSilhouette";
@@ -19,6 +20,9 @@ const CAPACITY_OPTIONS: { value: Capacity; label: string; sub: string }[] = [
   { value: "HIGH",      label: "꽤 마시는 편",   sub: "소주 1~2병 · 잘 마시는 편이에요" },
   { value: "VERY_HIGH", label: "주량이 강해요",  sub: "소주 2병 이상 · 웬만해선 안 취해요" },
 ];
+
+const Q4_MIN_LENGTH = 5;
+const Q4_SHORT_HINT = "5자 이상 적어주시거나 비워두세요";
 
 type Q2Option = (typeof Q2_OPTIONS)[number];
 type Q3Chip = (typeof Q3_CHIPS)[number];
@@ -65,6 +69,7 @@ function StepContent({
   const border1 = dark ? T.darkBorder : W.border;
   const borderS = dark ? T.darkBorderStrong : W.borderStrong;
   const bg = dark ? T.darkBg : W.bg;
+  const q4Short = q4Text.trim().length > 0 && q4Text.trim().length < Q4_MIN_LENGTH;
   const sans = T.sans;
   const mono = T.mono;
 
@@ -217,7 +222,9 @@ function StepContent({
           }}>{hint}</button>
         ))}
       </div>
-      {error && <p style={{ marginTop: 16, color: accent, fontSize: 13 }}>{error}</p>}
+      {q4Short
+        ? <p style={{ marginTop: 16, color: accent, fontSize: 13 }}>{Q4_SHORT_HINT}</p>
+        : error && <p style={{ marginTop: 16, color: accent, fontSize: 13 }}>{error}</p>}
     </div>
   );
 
@@ -268,7 +275,9 @@ export default function EmotionPage() {
   }, []);
 
   const totalSteps = mounted ? (isLoggedIn || drinkingCapacity !== null ? 4 : 5) : 5;
-  const [step, setStep] = useState(1);
+  const [rawStep, setStep] = useState(1);
+  // 세션 확인 후 총 단계가 5→4로 줄어도 현재 단계가 범위를 넘지 않도록 보정
+  const step = Math.min(rawStep, totalSteps);
   const [q1Value, setQ1Value] = useState(35);
   const [q2Selected, setQ2Selected] = useState<Q2Option | null>(null);
   const [q2Other, setQ2Other] = useState("");
@@ -291,15 +300,16 @@ export default function EmotionPage() {
     onSuccess: (emotionVector) => {
       // navigating=true로 설정해 isPending→false 되어도 로딩화면 유지
       setNavigating(true);
-      sessionStorage.removeItem("recommendReturnFlag");
       sessionStorage.removeItem("recommendCache");
+      sessionStorage.removeItem("recommendCacheKey");
+      sessionStorage.removeItem("recommendBatch");
       sessionStorage.setItem("emotionVector", JSON.stringify(emotionVector));
       if (!isLoggedIn) {
         sessionStorage.setItem("drinkingCapacity", drinkingCapacity ?? "MEDIUM");
       }
       router.push("/recommend");
     },
-    onError: () => setError("감정 분석에 실패했습니다."),
+    onError: (e: unknown) => setError(getApiErrorMessage(e, "감정 분석에 실패했어요. 잠시 후 다시 시도해 주세요.")),
   });
 
   const loading = analyzeMutation.isPending || navigating;
@@ -312,6 +322,7 @@ export default function EmotionPage() {
   function validate(): string | null {
     if (step === 2 && !q2Selected && !q2Other.trim()) return "풍경을 선택하거나 직접 입력해주세요.";
     if (step === 3 && q3Selected.size === 0 && !q3Other.trim()) return "맛을 하나 이상 선택하거나 직접 입력해주세요.";
+    if (step === 4 && q4Text.trim().length > 0 && q4Text.trim().length < Q4_MIN_LENGTH) return Q4_SHORT_HINT;
     if (!isLoggedIn && step === 5 && !drinkingCapacity) return "주량을 선택해주세요.";
     return null;
   }

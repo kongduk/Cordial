@@ -41,9 +41,22 @@ export default function UserHomePage() {
 
   useEffect(() => {
     if (status !== "authenticated") return;
-    api.get<{ onboardedAt: string | null }>("/user/profile").then(res => {
-      if (res.data.onboardedAt === null) router.replace("/onboarding");
-    }).catch(() => {});
+    let cancelled = false;
+    // 프로필 조회 실패 시 1회 재시도, 그래도 실패하면 리다이렉트 없이 계속 진행
+    const check = async () => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const res = await api.get<{ onboardedAt: string | null }>("/user/profile");
+          if (!cancelled && res.data.onboardedAt === null) router.replace("/onboarding");
+          return;
+        } catch (e) {
+          if (attempt === 1) console.warn("[home] 프로필 확인 실패:", (e as Error).message);
+          else await new Promise((r) => setTimeout(r, 800));
+        }
+      }
+    };
+    void check();
+    return () => { cancelled = true; };
   }, [status, router]);
 
   const { data: recentRecs = [] } = useQuery<RecentRec[]>({

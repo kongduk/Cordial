@@ -2,12 +2,14 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import api from "@/shared/lib/api";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { GlassSilhouette } from "@/shared/ui/GlassSilhouette";
 import { WebNav } from "@/shared/ui/WebNav";
 import type { GlassType } from "@/shared/ui/GlassSilhouette";
 import type { RecommendedCocktail } from "@/shared/types";
 import { W, T } from "@/shared/lib/theme";
+import { getApiErrorMessage, isRateLimited } from "@/shared/lib/apiError";
 
 const GLASS_ORDER: GlassType[] = ["rocks", "coupe", "martini"];
 
@@ -68,6 +70,8 @@ export default function RecommendPage() {
   const [batch, setBatch] = useState(0);
   const [innerIndex, setInnerIndex] = useState(0);
   const [doneCount, setDoneCount] = useState(0);
+  const [rateLimited, setRateLimited] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const router = useRouter();
 
   const dragStart = useRef<number | null>(null);
@@ -78,21 +82,30 @@ export default function RecommendPage() {
   listRef.current = list;
   batchRef.current = batch;
 
-  // Runs before browser paint — overrides any stale Next.js router-cache state
+  // Runs before browser paint — restores cached results for the same emotion vector (return from detail / refresh)
   useLayoutEffect(() => {
-    const returnFlag = sessionStorage.getItem("recommendReturnFlag");
+    const ev = sessionStorage.getItem("emotionVector");
+    const cap = sessionStorage.getItem("drinkingCapacity") ?? "MEDIUM";
     const cachedList = sessionStorage.getItem("recommendCache");
-    if (returnFlag && cachedList) {
-      sessionStorage.removeItem("recommendReturnFlag");
+    const cachedKey = sessionStorage.getItem("recommendCacheKey");
+    if (ev && cachedList && cachedKey === `${ev}|${cap}`) {
       try {
-        setList(JSON.parse(cachedList) as RecommendedCocktail[]);
-        setDoneCount(3);
-        setLoading(false);
-        cacheRestored.current = true;
-        return;
+        const parsed: unknown = JSON.parse(cachedList);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const savedBatch = Number(sessionStorage.getItem("recommendBatch") ?? "0");
+          const maxBatch = Math.max(0, Math.ceil(parsed.length / 3) - 1);
+          setList(parsed as RecommendedCocktail[]);
+          setBatch(Number.isInteger(savedBatch) && savedBatch >= 0 ? Math.min(savedBatch, maxBatch) : 0);
+          setDoneCount(3);
+          setLoading(false);
+          cacheRestored.current = true;
+          return;
+        }
       } catch {
-        sessionStorage.removeItem("recommendCache");
+        /* 손상된 캐시 — 무시하고 새로 요청 */
       }
+      sessionStorage.removeItem("recommendCache");
+      sessionStorage.removeItem("recommendCacheKey");
     }
     // Reset to loading state in case router cache preserved stale results
     setLoading(true);
@@ -125,9 +138,16 @@ export default function RecommendPage() {
       .then(res => {
         if (cancelled) return;
         setList(res.data);
+        setBatch(0);
         sessionStorage.setItem("recommendCache", JSON.stringify(res.data));
+        sessionStorage.setItem("recommendCacheKey", `${ev}|${drinkingCapacity}`);
+        sessionStorage.setItem("recommendBatch", "0");
       })
-      .catch(e => { if (!cancelled) setError((e as Error).message || "추천 실패"); })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setError(getApiErrorMessage(e, "추천을 불러오지 못했어요. 다시 시도해 주세요."));
+        setRateLimited(isRateLimited(e));
+      })
       .finally(() => {
         const elapsed = Date.now() - startTime;
         const remaining = Math.max(0, 1900 - elapsed);
@@ -138,7 +158,16 @@ export default function RecommendPage() {
       cancelled = true;
       clearTimeout(t1); clearTimeout(t2); clearTimeout(t3);
     };
-  }, [router]);
+  }, [router, attempt]);
+
+  function retry() {
+    cacheRestored.current = false;
+    setError(null);
+    setRateLimited(false);
+    setDoneCount(0);
+    setLoading(true);
+    setAttempt(n => n + 1);
+  }
 
   // Keyboard navigation — refs prevent stale closure without re-adding listener every render
   useEffect(() => {
@@ -156,13 +185,14 @@ export default function RecommendPage() {
   function goToDetail(c: RecommendedCocktail) {
     api.post("/user/taste-learn", { cocktailId: c.id }).catch(() => {});
     sessionStorage.setItem("selectedCocktail", JSON.stringify(c));
-    sessionStorage.setItem("recommendReturnFlag", "1");
     router.push(`/cocktail/${c.id}`);
   }
 
   function nextBatch() {
-    setBatch(b => b + 1);
+    const next = batch + 1;
+    setBatch(next);
     setInnerIndex(0);
+    sessionStorage.setItem("recommendBatch", String(next));
   }
 
   function advance(dir: 1 | -1) {
@@ -207,13 +237,19 @@ export default function RecommendPage() {
           <WebNav />
           <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 20, padding: "0 24px" }}>
             <p style={{ fontSize: 17, color: W.textMuted, textAlign: "center" }}>{msg}</p>
-            <button onClick={() => router.push("/emotion")} style={{ padding: "14px 28px", borderRadius: 12, background: W.accent, color: W.bg, border: "none", fontSize: 15, fontWeight: 600, fontFamily: W.sans, cursor: "pointer" }}>다시 시도하기</button>
+            {!rateLimited && (
+              <button onClick={retry} style={{ padding: "14px 28px", borderRadius: 12, background: W.accent, color: W.bg, border: "none", fontSize: 15, fontWeight: 600, fontFamily: W.sans, cursor: "pointer" }}>다시 시도하기</button>
+            )}
+            <Link href="/emotion" style={{ fontSize: 14, color: W.textMuted, textDecoration: "underline", fontFamily: W.sans }}>처음으로</Link>
           </div>
         </div>
         <div className="cordial-mob">
           <div style={{ width: "100%", minHeight: "100dvh", background: T.darkBg, color: T.darkText, fontFamily: T.sans, maxWidth: 430, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 20, padding: "0 24px" }}>
             <p style={{ fontSize: 17, color: T.darkTextMuted, textAlign: "center" }}>{msg}</p>
-            <button onClick={() => router.push("/emotion")} style={{ padding: "14px 28px", borderRadius: 14, background: T.accent, color: T.darkBg, border: "none", fontSize: 15, fontWeight: 600, fontFamily: T.sans, cursor: "pointer" }}>다시 시도하기</button>
+            {!rateLimited && (
+              <button onClick={retry} style={{ padding: "14px 28px", borderRadius: 14, background: T.accent, color: T.darkBg, border: "none", fontSize: 15, fontWeight: 600, fontFamily: T.sans, cursor: "pointer" }}>다시 시도하기</button>
+            )}
+            <Link href="/emotion" style={{ fontSize: 14, color: T.darkTextMuted, textDecoration: "underline", fontFamily: T.sans }}>처음으로</Link>
           </div>
         </div>
       </>

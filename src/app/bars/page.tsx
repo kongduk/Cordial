@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { APIProvider, Map, AdvancedMarker, InfoWindow, useMap } from "@vis.gl/react-google-maps";
 import api from "@/shared/lib/api";
+import { getApiErrorMessage } from "@/shared/lib/apiError";
 import Link from "next/link";
 import { GlassGlyph } from "@/shared/ui/GlassSilhouette";
 import { WebNav } from "@/shared/ui/WebNav";
@@ -91,6 +92,93 @@ function NumberPin({ num, active }: { num: number; active?: boolean }) {
   );
 }
 
+function Spinner({ color }: { color: string }) {
+  return (
+    <span aria-hidden style={{ display: "inline-block", width: 14, height: 14, borderRadius: "50%", border: `2px solid ${color}`, borderTopColor: "transparent", animation: "spin 0.8s linear infinite", verticalAlign: "middle" }} />
+  );
+}
+
+function openMaps(b: RecommendedBar) {
+  const url = b.placeId
+    ? `https://www.google.com/maps/place/?q=place_id:${b.placeId}`
+    : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(b.name)}`;
+  window.open(url, "_blank");
+}
+
+
+function Chip({ value, selected, onSelect }: { value: string; selected: boolean; onSelect: () => void }) {
+  return (
+    <button onClick={onSelect} style={{
+      padding: "8px 16px", borderRadius: 100,
+      background: selected ? C.accent : "transparent",
+      border: `1px solid ${selected ? C.accent : C.borderStrong}`,
+      color: selected ? "#fff" : C.muted,
+      fontSize: 13, fontWeight: selected ? 600 : 400, cursor: "pointer", fontFamily: C.sans,
+      transition: "all 0.15s",
+    }}>{value}</button>
+  );
+}
+
+
+function BarDetailCard({ b, rank, dark }: { b: RecommendedBar; rank: number; dark?: boolean }) {
+  const txt = dark ? C.darkText : C.text;
+  const muted = dark ? C.darkMuted : C.muted;
+  const faint = dark ? C.darkFaint : C.faint;
+  const surface2 = dark ? C.darkSurface2 : C.surface2;
+  const borderStrong = dark ? C.darkBorderStrong : C.borderStrong;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+            <span style={{ fontFamily: C.mono, fontSize: 10, color: C.accent, background: C.accentTint, padding: "2px 8px", borderRadius: 4, letterSpacing: 1 }}>#{rank}</span>
+            {b.rating && <span style={{ fontSize: 12, color: muted }}>★ {b.rating}</span>}
+            <PriceTag level={b.priceLevel} />
+          </div>
+          <h2 style={{ fontSize: 20, fontWeight: 700, letterSpacing: -0.5, margin: 0, color: txt }}>{b.name}</h2>
+          <p style={{ fontSize: 12, color: muted, margin: "4px 0 0" }}>{b.area} · {b.distanceKm}km</p>
+        </div>
+        <button
+          onClick={() => openMaps(b)}
+          style={{ flexShrink: 0, padding: "8px 12px", borderRadius: 10, border: `1px solid ${borderStrong}`, background: "transparent", color: muted, fontSize: 12, cursor: "pointer", fontFamily: C.sans, display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" /><circle cx="12" cy="9" r="2.5" /></svg>
+          Google Maps
+        </button>
+      </div>
+
+      {b.description && <p style={{ margin: 0, fontSize: 14, lineHeight: 1.65, color: txt }}>{b.description}</p>}
+
+      {b.signature && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: surface2, borderRadius: 10 }}>
+          <GlassGlyph type={pickGlass(b.signature)} size={18} color={C.accent} />
+          <div>
+            <div style={{ fontSize: 10, fontFamily: C.mono, letterSpacing: 1.2, color: faint, textTransform: "uppercase", marginBottom: 2 }}>Signature</div>
+            <div style={{ fontSize: 13, color: txt, fontWeight: 500 }}>{b.signature}</div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {b.matchReasons.map((r) => (
+          <span key={r} style={{ fontSize: 11, padding: "3px 10px", borderRadius: 100, background: C.accentTint, color: C.accent }}>{r}</span>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {b.moodTags.map((m) => (
+          <span key={m} style={{ fontSize: 11, padding: "3px 10px", borderRadius: 100, border: `1px solid ${borderStrong}`, color: muted }}>{m}</span>
+        ))}
+        {b.cocktailStyles.map((s) => (
+          <span key={s} style={{ fontSize: 11, padding: "3px 10px", borderRadius: 100, border: `1px solid ${borderStrong}`, color: muted }}>🍹 {s}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
 export default function BarsPage() {
   const [step, setStep] = useState<Step>("survey");
   const [locState, setLocState] = useState<LocState>("pending");
@@ -102,6 +190,10 @@ export default function BarsPage() {
   const [mapTarget, setMapTarget] = useState<{ lat: number; lng: number } | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [pipelineReady, setPipelineReady] = useState(false);
+  const [pipelineError, setPipelineError] = useState<string | null>(null);
+  const [manualArea, setManualArea] = useState("");
+  const [geocoding, setGeocoding] = useState(false);
+  const [geoError, setGeoError] = useState<string | null>(null);
 
   const requestLocation = useCallback(() => {
     setLocState("pending");
@@ -123,10 +215,11 @@ export default function BarsPage() {
   useEffect(() => {
     if (!location) return;
     setPipelineReady(false);
+    setPipelineError(null);
     // 60초 안에 응답 없으면 강제 활성화 (파이프라인이 오래 걸릴 수 있음)
     const fallback = setTimeout(() => setPipelineReady(true), 60_000);
     api.post("/bars/nearby", { lat: location.lat, lng: location.lng })
-      .catch(() => {})
+      .catch((e: unknown) => setPipelineError(getApiErrorMessage(e, "주변 바 정보를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.")))
       .finally(() => { clearTimeout(fallback); setPipelineReady(true); });
     return () => clearTimeout(fallback);
   }, [location]);
@@ -146,25 +239,35 @@ export default function BarsPage() {
         setMapTarget({ lat: firstWithCoords.latitude, lng: firstWithCoords.longitude });
       }
     },
-    onError: () => {
+    onError: (e: unknown) => {
       setStep("survey");
-      setSubmitError("추천 중 오류가 발생했어요. 다시 시도해주세요.");
+      setSubmitError(getApiErrorMessage(e, "추천 중 오류가 발생했어요. 다시 시도해 주세요."));
     },
   });
 
+  async function handleGeocode() {
+    const area = manualArea.trim();
+    if (!area || geocoding) return;
+    setGeocoding(true);
+    setGeoError(null);
+    try {
+      const res = await api.get<{ lat: number; lng: number }>("/bars/geocode", { params: { area } });
+      setLocation({ lat: res.data.lat, lng: res.data.lng });
+      setLocState("ok");
+    } catch (e: unknown) {
+      setGeoError(getApiErrorMessage(e, "지역을 찾지 못했어요. 다른 이름으로 다시 입력해 주세요."));
+    } finally {
+      setGeocoding(false);
+    }
+  }
+
   function handleSubmit() {
+    setSubmitError(null);
     const s = survey as BarSurvey;
     if (!s.mood || !s.cocktailStyle || !s.purpose || !s.budget) return;
     if (!location) return;
     setStep("loading");
     recommendMutation.mutate({ lat: location.lat, lng: location.lng, s });
-  }
-
-  function openMaps(b: RecommendedBar) {
-    const url = b.placeId
-      ? `https://www.google.com/maps/place/?q=place_id:${b.placeId}`
-      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(b.name)}`;
-    window.open(url, "_blank");
   }
 
   function goTo(idx: number) {
@@ -182,34 +285,35 @@ export default function BarsPage() {
   const canSubmit = allFilled && locState === "ok" && pipelineReady;
 
   // ── Survey ──
-  function Chip({ value, selected, onSelect }: { value: string; selected: boolean; onSelect: () => void }) {
+  // 위치 거부 시 안내 + 지역 직접 입력 (함수 호출로 렌더해 입력창 포커스 유지)
+  function renderDeniedPanel(dark: boolean) {
+    const accent = dark ? "#E05555" : "#C43C3C";
+    const inputBorder = dark ? C.darkBorderStrong : C.borderStrong;
     return (
-      <button onClick={onSelect} style={{
-        padding: "8px 16px", borderRadius: 100,
-        background: selected ? C.accent : "transparent",
-        border: `1px solid ${selected ? C.accent : C.borderStrong}`,
-        color: selected ? "#fff" : C.muted,
-        fontSize: 13, fontWeight: selected ? 600 : 400, cursor: "pointer", fontFamily: C.sans,
-        transition: "all 0.15s",
-      }}>{value}</button>
+      <div style={{ padding: "14px 16px", borderRadius: 12, background: dark ? "rgba(220,60,60,0.1)" : "rgba(220,60,60,0.07)", border: `1px solid ${dark ? "rgba(220,60,60,0.25)" : "rgba(220,60,60,0.2)"}`, marginBottom: dark ? 20 : 0, display: "flex", flexDirection: "column", gap: 10 }}>
+        <p style={{ margin: 0, fontSize: 14, color: accent, fontWeight: 600 }}>위치 권한이 필요해요</p>
+        <p style={{ margin: 0, fontSize: 12, color: accent, opacity: 0.85, lineHeight: 1.5 }}>브라우저 설정에서 위치 권한을 허용하거나, 아래에 지역을 입력해 주세요.</p>
+        <button onClick={requestLocation}
+          style={{ alignSelf: "flex-start", padding: "9px 14px", minHeight: 40, borderRadius: 8, background: accent, border: "none", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: C.sans }}>
+          위치 다시 확인하기
+        </button>
+        <form onSubmit={(e) => { e.preventDefault(); void handleGeocode(); }} style={{ display: "flex", gap: 8 }}>
+          <input type="text" value={manualArea} onChange={(e) => setManualArea(e.target.value)} placeholder="예: 강남역, 해운대" maxLength={100} aria-label="지역 직접 입력"
+            style={{ flex: 1, minWidth: 0, height: 44, borderRadius: 10, border: `1px solid ${inputBorder}`, background: dark ? C.darkSurface : C.surface, color: dark ? C.darkText : C.text, fontSize: 16, fontFamily: C.sans, padding: "0 12px", outline: "none" }} />
+          <button type="submit" disabled={geocoding || !manualArea.trim()}
+            style={{ height: 44, padding: "0 16px", borderRadius: 10, border: "none", background: C.accent, color: "#fff", fontSize: 13, fontWeight: 600, fontFamily: C.sans, cursor: geocoding || !manualArea.trim() ? "not-allowed" : "pointer", opacity: geocoding || !manualArea.trim() ? 0.6 : 1, whiteSpace: "nowrap" }}>
+            {geocoding ? "찾는 중..." : "이 지역으로 찾기"}
+          </button>
+        </form>
+        {geoError && <p role="alert" style={{ margin: 0, fontSize: 12, color: accent }}>{geoError}</p>}
+      </div>
     );
   }
 
   function SurveyForm() {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-        {locState === "denied" && (
-          <div style={{ padding: "14px 18px", borderRadius: 12, background: "rgba(220,60,60,0.07)", border: "1px solid rgba(220,60,60,0.2)", display: "flex", flexDirection: "column", gap: 10 }}>
-            <p style={{ margin: 0, fontSize: 14, color: "#C43C3C", fontWeight: 600 }}>위치 정보를 동의하지 않았어요!</p>
-            <p style={{ margin: 0, fontSize: 12, color: "#C43C3C", opacity: 0.8 }}>주변 바를 찾으려면 위치 접근이 필요해요.</p>
-            <button
-              onClick={requestLocation}
-              style={{ alignSelf: "flex-start", padding: "7px 14px", borderRadius: 8, background: "#C43C3C", border: "none", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: C.sans }}
-            >
-              위치정보 허락하기
-            </button>
-          </div>
-        )}
+        {locState === "denied" && renderDeniedPanel(false)}
         {locState === "pending" && (
           <div style={{ fontSize: 13, color: C.muted, display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.accent, display: "inline-block", animation: "pulse 1.2s infinite" }} />
@@ -218,8 +322,8 @@ export default function BarsPage() {
         )}
         {locState === "ok" && !pipelineReady && (
           <div style={{ fontSize: 13, color: C.muted, display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.accent, display: "inline-block", animation: "pulse 1.2s infinite" }} />
-            주변 바 데이터 수집 중... (설문을 미리 작성해두세요)
+            <Spinner color={C.accent} />
+            <span>주변 바 데이터 수집 중... (설문을 미리 작성해 두세요)<br /><span style={{ fontSize: 12, color: C.faint }}>처음 찾는 지역은 최대 1분 정도 걸릴 수 있어요</span></span>
           </div>
         )}
         {locState === "ok" && pipelineReady && (
@@ -227,6 +331,9 @@ export default function BarsPage() {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
             위치 확인됨 — 주변 바를 매칭할 준비가 됐어요.
           </div>
+        )}
+        {locState === "ok" && pipelineReady && pipelineError && (
+          <p role="alert" style={{ margin: 0, fontSize: 12, color: "#D32F2F" }}>{pipelineError}</p>
         )}
 
         {([
@@ -267,65 +374,6 @@ export default function BarsPage() {
     );
   }
 
-  // ── Bar Detail Card ──
-  function BarDetailCard({ b, rank, dark }: { b: RecommendedBar; rank: number; dark?: boolean }) {
-    const txt = dark ? C.darkText : C.text;
-    const muted = dark ? C.darkMuted : C.muted;
-    const faint = dark ? C.darkFaint : C.faint;
-    const surface2 = dark ? C.darkSurface2 : C.surface2;
-    const borderStrong = dark ? C.darkBorderStrong : C.borderStrong;
-
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-              <span style={{ fontFamily: C.mono, fontSize: 10, color: C.accent, background: C.accentTint, padding: "2px 8px", borderRadius: 4, letterSpacing: 1 }}>#{rank}</span>
-              {b.rating && <span style={{ fontSize: 12, color: muted }}>★ {b.rating}</span>}
-              <PriceTag level={b.priceLevel} />
-            </div>
-            <h2 style={{ fontSize: 20, fontWeight: 700, letterSpacing: -0.5, margin: 0, color: txt }}>{b.name}</h2>
-            <p style={{ fontSize: 12, color: muted, margin: "4px 0 0" }}>{b.area} · {b.distanceKm}km</p>
-          </div>
-          <button
-            onClick={() => openMaps(b)}
-            style={{ flexShrink: 0, padding: "8px 12px", borderRadius: 10, border: `1px solid ${borderStrong}`, background: "transparent", color: muted, fontSize: 12, cursor: "pointer", fontFamily: C.sans, display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" /><circle cx="12" cy="9" r="2.5" /></svg>
-            Google Maps
-          </button>
-        </div>
-
-        {b.description && <p style={{ margin: 0, fontSize: 14, lineHeight: 1.65, color: txt }}>{b.description}</p>}
-
-        {b.signature && (
-          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: surface2, borderRadius: 10 }}>
-            <GlassGlyph type={pickGlass(b.signature)} size={18} color={C.accent} />
-            <div>
-              <div style={{ fontSize: 10, fontFamily: C.mono, letterSpacing: 1.2, color: faint, textTransform: "uppercase", marginBottom: 2 }}>Signature</div>
-              <div style={{ fontSize: 13, color: txt, fontWeight: 500 }}>{b.signature}</div>
-            </div>
-          </div>
-        )}
-
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {b.matchReasons.map((r) => (
-            <span key={r} style={{ fontSize: 11, padding: "3px 10px", borderRadius: 100, background: C.accentTint, color: C.accent }}>{r}</span>
-          ))}
-        </div>
-
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {b.moodTags.map((m) => (
-            <span key={m} style={{ fontSize: 11, padding: "3px 10px", borderRadius: 100, border: `1px solid ${borderStrong}`, color: muted }}>{m}</span>
-          ))}
-          {b.cocktailStyles.map((s) => (
-            <span key={s} style={{ fontSize: 11, padding: "3px 10px", borderRadius: 100, border: `1px solid ${borderStrong}`, color: muted }}>🍹 {s}</span>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
   // ── WEB ──────────────────────────────────────────────────────────────────────
   function WebContent() {
     return (
@@ -337,13 +385,14 @@ export default function BarsPage() {
 
         {step === "survey" && (
           <div style={{ maxWidth: 520 }}>
-            <SurveyForm />
+            {SurveyForm()}
           </div>
         )}
 
         {step === "loading" && (
           <div style={{ textAlign: "center", padding: "100px 0", color: C.faint, fontFamily: C.mono, fontSize: 12, letterSpacing: 0.5 }}>
-            주변 바를 분석하고 있어요...
+            <Spinner color={C.accent} /> 주변 바를 분석하고 있어요...
+            <div style={{ marginTop: 10, fontSize: 12 }}>처음 찾는 지역은 최대 1분 정도 걸릴 수 있어요</div>
           </div>
         )}
 
@@ -490,21 +539,14 @@ export default function BarsPage() {
           <div style={{ padding: "0 20px" }}>
             <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: -0.6, margin: "0 0 24px", lineHeight: 1.2 }}>오늘 밤<br />당신을 위한 바.</h1>
 
-            {locState === "denied" && (
-              <div style={{ padding: "14px 16px", borderRadius: 12, background: "rgba(220,60,60,0.1)", border: "1px solid rgba(220,60,60,0.25)", marginBottom: 20, display: "flex", flexDirection: "column", gap: 8 }}>
-                <p style={{ margin: 0, fontSize: 14, color: "#E05555", fontWeight: 600 }}>위치 정보를 동의하지 않았어요!</p>
-                <button onClick={requestLocation} style={{ alignSelf: "flex-start", padding: "7px 14px", borderRadius: 8, background: "#E05555", border: "none", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: C.sans }}>
-                  위치정보 허락하기
-                </button>
-              </div>
-            )}
+            {locState === "denied" && renderDeniedPanel(true)}
             {locState === "pending" && (
               <p style={{ fontSize: 12, color: C.darkMuted, marginBottom: 20 }}>📍 위치 확인 중...</p>
             )}
             {locState === "ok" && !pipelineReady && (
               <p style={{ fontSize: 12, color: C.darkMuted, marginBottom: 20, display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ width: 7, height: 7, borderRadius: "50%", background: C.accent, display: "inline-block", animation: "pulse 1.2s infinite" }} />
-                주변 바 수집 중... (설문 미리 작성 가능)
+                <Spinner color={C.accent} />
+                <span>주변 바 수집 중... (설문 미리 작성 가능)<br /><span style={{ fontSize: 11, color: C.darkFaint }}>처음 찾는 지역은 최대 1분 정도 걸릴 수 있어요</span></span>
               </p>
             )}
             {locState === "ok" && pipelineReady && (
@@ -512,6 +554,9 @@ export default function BarsPage() {
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
                 위치 확인됨
               </p>
+            )}
+            {locState === "ok" && pipelineReady && pipelineError && (
+              <p role="alert" style={{ fontSize: 12, color: "#E05555", marginBottom: 20, marginTop: 0 }}>{pipelineError}</p>
             )}
 
             <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -563,7 +608,8 @@ export default function BarsPage() {
 
         {step === "loading" && (
           <div style={{ textAlign: "center", padding: "80px 0", color: C.darkFaint, fontFamily: C.mono, fontSize: 12 }}>
-            주변 바를 분석하고 있어요...
+            <Spinner color={C.accent} /> 주변 바를 분석하고 있어요...
+            <div style={{ marginTop: 10, fontSize: 12 }}>처음 찾는 지역은 최대 1분 정도 걸릴 수 있어요</div>
           </div>
         )}
 
@@ -634,7 +680,7 @@ export default function BarsPage() {
 
   return (
     <>
-      <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }`}</style>
+      <style>{`@keyframes spin { to{transform:rotate(360deg)} } @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }`}</style>
       <div className="cordial-web" style={{ background: C.bg, minHeight: "100dvh", color: C.text, fontFamily: C.sans }}>
         <WebNav active="/bars" />
         {WebContent()}
