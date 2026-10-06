@@ -48,6 +48,8 @@ export interface MixAnalysisResult {
   aroma: string;
   description: string;
   name: string;
+  /** 맛 모델 표에 없어 근사 계산된 재료 이름 */
+  unknownIngredients?: string[];
 }
 
 export interface BarData {

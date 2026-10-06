@@ -4,6 +4,8 @@ import { checkRateLimit } from "@/shared/lib/rateLimit";
 import { prisma } from "@/shared/lib/prisma";
 import { checkSameOrigin } from "@/shared/lib/internalAuth";
 import { readJsonBody } from "@/shared/lib/readJson";
+import { computeFlavor } from "@/shared/lib/flavorModel";
+import type { MixMethod } from "@/shared/types";
 
 const MAX_CUSTOM_COCKTAILS_PER_USER = 200;
 
@@ -12,14 +14,9 @@ interface SaveBody {
   description: string;
   method: string;
   ingredients: Array<{ name: string; amount: number; abv: number }>;
-  taste: {
-    sweetness: number;
-    sourness: number;
-    bitterness: number;
-    strength: number;
-    freshness: number;
-  };
-  abv: number;
+  /** 하위 호환용 — 서버는 무시하고 flavorModel 로 직접 계산한다 */
+  taste?: unknown;
+  abv?: unknown;
 }
 
 export async function POST(req: NextRequest) {
@@ -38,7 +35,7 @@ export async function POST(req: NextRequest) {
     const body = parsed.data as unknown as SaveBody;
 
     const validMethods = ["shaking", "stirring", "build", "blending", "neat", "floating"];
-    if (typeof body !== "object" || body === null || typeof body.taste !== "object" || body.taste === null) {
+    if (typeof body !== "object" || body === null) {
       return NextResponse.json({ error: "잘못된 요청입니다." }, { status: 400 });
     }
     if (typeof body.name !== "string" || !body.name.trim() || body.name.length > 80) {
@@ -62,8 +59,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "유효한 재료가 없습니다." }, { status: 400 });
     }
 
-    const clamp01 = (v: number) => isFinite(Number(v)) ? Math.min(1, Math.max(0, Number(v))) : 0;
-    const safeAbv = isFinite(Number(body.abv)) ? Math.min(100, Math.max(0, Number(body.abv))) : 0;
+    // 맛/도수는 클라이언트 값을 신뢰하지 않고 서버에서 재료·용량·제조법으로 직접 계산 (모의 제조 분석과 동일 모델)
+    const flavor = computeFlavor(
+      safeIngredients.map((ing) => ({
+        name: ing.name.trim(),
+        ml: Number(ing.amount),
+        abv: isFinite(Number(ing.abv)) ? Math.min(100, Math.max(0, Number(ing.abv))) : undefined,
+      })),
+      body.method as MixMethod,
+    );
 
     // 유저별 advisory lock 으로 count-then-insert 를 직렬화 (동시 요청으로 상한 우회 방지)
     const cocktail = await prisma.$transaction(async (tx) => {
@@ -106,12 +110,12 @@ export async function POST(req: NextRequest) {
           category: "커스텀",
           isCustom: true,
           createdBy: userId,
-          abv: safeAbv,
-          sweetness: clamp01(body.taste.sweetness),
-          sourness: clamp01(body.taste.sourness),
-          bitterness: clamp01(body.taste.bitterness),
-          strength: clamp01(body.taste.strength),
-          freshness: clamp01(body.taste.freshness),
+          abv: flavor.abv,
+          sweetness: flavor.sweetness,
+          sourness: flavor.sourness,
+          bitterness: flavor.bitterness,
+          strength: flavor.strength,
+          freshness: flavor.freshness,
           popularity: 0,
           ingredients: {
             create: safeIngredients.map((ing, i) => ({

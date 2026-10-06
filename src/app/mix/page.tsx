@@ -14,8 +14,8 @@ import type { IngredientOption } from "@/shared/ui/IngredientSearch";
 import type { MixIngredient, MixMethod, MixAnalysisResult } from "@/shared/types";
 import { W, T } from "@/shared/lib/theme";
 import { getApiErrorMessage } from "@/shared/lib/apiError";
+import { computeFlavor } from "@/shared/lib/flavorModel";
 
-const DILUTION: Record<string, number> = { shaking: 0.30, stirring: 0.225, build: 0.125, blending: 0.35, neat: 0, floating: 0.05 };
 
 const METHODS: { id: MixMethod; label: string; labelEn: string }[] = [
   { id: "shaking", label: "셰이킹", labelEn: "Shaking" },
@@ -67,8 +67,7 @@ export default function MixPage() {
 
   const liveAbv = useMemo(() => {
     if (totalVolume === 0) return 0;
-    const base = ings.reduce((s, i) => s + i.amount * (i.abv / 100), 0) / totalVolume * 100;
-    return Math.round(base * (1 - (DILUTION[method] ?? 0)) * 10) / 10;
+    return computeFlavor(ings.map((i) => ({ name: i.name, ml: i.amount, abv: i.abv })), method).abv;
   }, [ings, totalVolume, method]);
 
   async function saveIngredient(name: string, abv: number) {
