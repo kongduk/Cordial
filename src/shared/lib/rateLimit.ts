@@ -14,7 +14,8 @@ function getRedis(): Redis {
     const url = process.env.UPSTASH_REDIS_REST_URL;
     const token = process.env.UPSTASH_REDIS_REST_TOKEN;
     if (!url || !token) throw new Error("UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN 환경변수가 설정되지 않았습니다.");
-    redis = new Redis({ url, token });
+    // Redis 장애 시 기본 재시도(지수 백오프 5회)로 모든 요청이 수 초씩 지연되지 않도록 1회만 짧게 재시도
+    redis = new Redis({ url, token, retry: { retries: 1, backoff: () => 100 } });
   }
   return redis;
 }
@@ -168,6 +169,25 @@ export async function allowByKey(endpoint: Endpoint, identifier: string): Promis
     // (유료 API 경로는 checkRateLimit 이 프로덕션 미설정 시 503, 전역 예산은 consumeGlobalBudget 이 프로덕션 장애 시 fail-closed)
     return true;
   }
+}
+
+/**
+ * 한도를 소비하지 않고 현재 초과 여부만 확인한다 (읽기 전용). true = 아직 허용(남은 횟수 > 0).
+ * 실패한 시도만 세는 카운터(login-email-global)의 사전 확인용. Redis 장애 시 fail-open.
+ */
+export async function peekByKey(endpoint: Endpoint, identifier: string): Promise<boolean> {
+  try {
+    const { remaining } = await getLimiter(endpoint).getRemaining(identifier);
+    return remaining > 0;
+  } catch (e) {
+    console.error(`[rateLimit:${endpoint}:peek]`, e);
+    return true;
+  }
+}
+
+/** 한도를 1회 소비한다 (결과 무시). 실패한 시도를 기록할 때 사용. */
+export async function consumeByKey(endpoint: Endpoint, identifier: string): Promise<void> {
+  await allowByKey(endpoint, identifier);
 }
 
 /** 일일 예산 1회 소비 (기본 key "global"). true = 허용. 프로덕션에서는 Redis 미설정/런타임 오류 모두 fail-closed (비용 보호). */

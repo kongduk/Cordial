@@ -7,7 +7,7 @@ import NaverProvider from "next-auth/providers/naver";
 import { PrismaAdapter } from "@next-auth/prisma-adapter";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/shared/lib/prisma";
-import { allowByKey, getClientIpKey } from "@/shared/lib/rateLimit";
+import { allowByKey, consumeByKey, getClientIpKey, peekByKey } from "@/shared/lib/rateLimit";
 
 // 존재하지 않는 계정에도 bcrypt 비용을 동일하게 지불해 타이밍 차이로 계정 존재 여부를 알 수 없게 함
 let dummyHash: Promise<string> | null = null;
@@ -53,14 +53,20 @@ const handler = NextAuth({
         const ip = getClientIpKey({ headers: { get: headerValue } });
         if (!(await allowByKey("login-ip", `ip:${ip}`))) return null;
         if (!(await allowByKey("login", `email:${email}|net:${ip}`))) return null;
-        // 분산 IP 에서 단일 계정을 노리는 공격 방어: 이메일 단독 전역 상한
-        if (!(await allowByKey("login-email-global", `email:${email}`))) return null;
+        // 분산 IP 에서 단일 계정을 노리는 공격 방어: 이메일 단독 전역 상한.
+        // 실패한 비밀번호 시도만 센다 (피해자가 올바른 비밀번호로도 잠기는 것을 방지): 사전에는 읽기 전용 확인만 하고,
+        // 비교 실패 후에만 소비한다.
+        const globalKey = `email:${email}`;
+        if (!(await peekByKey("login-email-global", globalKey))) return null;
 
         const user = await prisma.user.findFirst({
           where: { email: { equals: email, mode: "insensitive" } },
         });
         const valid = await bcrypt.compare(password, user?.password ?? (await getDummyHash()));
-        if (!user || !user.password || !valid) return null;
+        if (!user || !user.password || !valid) {
+          await consumeByKey("login-email-global", globalKey);
+          return null;
+        }
         return { id: user.id, email: user.email, name: user.name } as { id: string; email: string | null; name: string | null };
       },
     }),
@@ -88,7 +94,7 @@ const MAX_AUTH_BODY_BYTES = 16 * 1024;
 
 // NextAuth 는 body 를 크기 제한 없이 파싱하므로, POST 는 Content-Length 를 필수로 하고 상한을 둔다.
 // (정상 signIn/signOut/callback 은 작은 form-urlencoded 요청이며 항상 Content-Length 를 가진다)
-async function guardedPost(req: NextRequest, ctx: { params: { nextauth: string[] } }) {
+async function guardedPost(req: NextRequest, ctx: { params: Promise<{ nextauth: string[] }> }) {
   const raw = req.headers.get("content-length");
   if (raw === null || !/^\d{1,10}$/.test(raw)) {
     return NextResponse.json({ error: "Content-Length 헤더가 필요합니다." }, { status: 411 });
