@@ -1,13 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
 import { generateAccessToken, generateRefreshToken } from "@/server/auth/tokens";
+import { prisma } from "@/shared/lib/prisma";
+import { checkSameOrigin } from "@/shared/lib/internalAuth";
 
 export async function POST(req: NextRequest) {
-  try {
-    const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const originError = checkSameOrigin(req);
+  if (originError) return originError;
 
-    const userId = (token.id ?? token.sub) as string;
+  try {
+    // 반드시 NextAuth 세션(쿠키)에서만 발급 — Bearer 로 새 토큰을 찍어내지 않는다
+    const secret = process.env.NEXTAUTH_SECRET;
+    const token = secret ? await getToken({ req, secret }) : null;
+    const userId = token?.id ?? token?.sub;
+    if (typeof userId !== "string" || !userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const exists = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+    if (!exists) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
     const accessToken = generateAccessToken(userId);
     const refreshToken = await generateRefreshToken(userId);
 

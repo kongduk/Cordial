@@ -1,16 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getToken } from "next-auth/jwt";
 import { pantryRecommend } from "@/server/ai/pantryRecommend";
-import { checkInternalSecret } from "@/shared/lib/internalAuth";
+import { checkSameOrigin } from "@/shared/lib/internalAuth";
+import { getAuthUser } from "@/server/auth/getUser";
 import { checkRateLimit } from "@/shared/lib/rateLimit";
 
 export async function POST(req: NextRequest) {
-  const authError = checkInternalSecret(req);
-  if (authError) return authError;
+  const originError = checkSameOrigin(req);
+  if (originError) return originError;
 
-  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-  const email = (token as { email?: string } | null)?.email;
-  const rateLimitError = await checkRateLimit(req, "pantry-recommend", email);
+  const authUser = await getAuthUser(req);
+  const rateLimitError = await checkRateLimit(req, "pantry-recommend", authUser?.email, authUser?.id);
   if (rateLimitError) return rateLimitError;
 
   try {
@@ -22,9 +21,10 @@ export async function POST(req: NextRequest) {
 
     const validIngredients = ingredients
       .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      .map((item) => item.trim().slice(0, 50))
       .slice(0, 100);
 
-    const userId = (token?.id ?? token?.sub) as string | undefined;
+    const userId = authUser?.id;
 
     const result = await pantryRecommend(validIngredients, userId);
     return NextResponse.json(result);

@@ -12,7 +12,7 @@ B2C AI 칵테일 추천 앱. 감정 기반 추천, 보유 재료 매칭, 모의 
 - **Styling**: Tailwind CSS (인라인 style 병용)
 - **DB**: PostgreSQL (Supabase) + Prisma 7 ORM
 - **Auth**: NextAuth v4 (Google, GitHub, credentials + PrismaAdapter)
-- **AI**: Google Gemini API (`gemini-2.0-flash`)
+- **AI**: Google Gemini API (`gemini-2.5-flash`)
 - **FastAPI**: 바 데이터 수집 파이프라인 (`backend/`)
 
 ## 디렉토리 구조 (FSD)

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getToken } from "next-auth/jwt";
+import { getAuthUser } from "@/server/auth/getUser";
+import { checkSameOrigin } from "@/shared/lib/internalAuth";
+import { checkRateLimit } from "@/shared/lib/rateLimit";
 import { prisma } from "@/shared/lib/prisma";
 import { NEARBY_RADIUS_M, ensureFreshBars } from "@/server/barsPipeline";
 import type { BarSurvey, RecommendedBar, BarMood, BarPurpose, CocktailStyle, BarBudget } from "@/shared/types";
@@ -150,6 +152,13 @@ function scoreBar(
 }
 
 export async function POST(req: NextRequest) {
+  const originError = checkSameOrigin(req);
+  if (originError) return originError;
+
+  const authUser = await getAuthUser(req);
+  const rateLimitError = await checkRateLimit(req, "bars-recommend", authUser?.email, authUser?.id);
+  if (rateLimitError) return rateLimitError;
+
   try {
     const body = await req.json() as { lat: unknown; lng: unknown; survey: unknown };
     const lat = Number(body.lat);
@@ -174,9 +183,8 @@ export async function POST(req: NextRequest) {
 
     // 로그인 유저의 최근 EmotionLog 조회
     let emotionMoodScores: Record<string, number> | null = null;
-    const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-    if (token?.id || token?.sub) {
-      const userId = (token.id ?? token.sub) as string;
+    if (authUser?.id) {
+      const userId = authUser.id;
       const recentLogs = await prisma.emotionLog.findMany({
         where: { userId },
         orderBy: { createdAt: "desc" },

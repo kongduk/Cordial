@@ -6,7 +6,7 @@ import httpx
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-2.0-flash:generateContent"
+    "gemini-2.5-flash:generateContent"
 )
 
 PROMPT_TEMPLATE = """당신은 한국 칵테일 바(Bar) 전문 큐레이터입니다. 바의 이름, 주소, 구글 리뷰, 네이버 블로그 후기, 인스타그램 캡션을 종합 분석해서 반드시 JSON만 반환하세요.
@@ -167,5 +167,5 @@ async def analyze_bar(
                     result["purposeTags"] = inferred["purposeTags"]
             return result
     except Exception as e:
-        print(f"[Gemini] 실패 — 규칙 추론 사용: {name} ({e})")
+        print(f"[Gemini] 실패 — 규칙 추론 사용: {name} ({type(e).__name__})")  # str(e)에 API 키 포함 URL이 들어갈 수 있음
         return infer_from_name(name, address)

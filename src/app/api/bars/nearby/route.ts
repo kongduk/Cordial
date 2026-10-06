@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/shared/lib/prisma";
+import { getAuthUser } from "@/server/auth/getUser";
+import { checkSameOrigin } from "@/shared/lib/internalAuth";
+import { checkRateLimit } from "@/shared/lib/rateLimit";
 import {
   NEARBY_RADIUS_M,
   countFreshNearbyBarsInDB,
@@ -7,6 +10,13 @@ import {
 } from "@/server/barsPipeline";
 
 export async function POST(req: NextRequest) {
+  const originError = checkSameOrigin(req);
+  if (originError) return originError;
+
+  const authUser = await getAuthUser(req);
+  const rateLimitError = await checkRateLimit(req, "bars-nearby", authUser?.email, authUser?.id);
+  if (rateLimitError) return rateLimitError;
+
   if (!process.env.GOOGLE_MAPS_API_KEY) {
     return NextResponse.json({ error: "Google Maps API 키가 설정되지 않았습니다." }, { status: 503 });
   }

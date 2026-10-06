@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getToken } from "next-auth/jwt";
+import { getUserId } from "@/server/auth/getUser";
 import { prisma } from "@/shared/lib/prisma";
 
 export async function GET(req: NextRequest) {
   try {
-    const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-    const userId = (token?.id ?? token?.sub) as string | undefined;
+    const userId = (await getUserId(req)) ?? undefined;
 
     const cocktails = await prisma.cocktail.findMany({
       where: userId

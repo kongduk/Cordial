@@ -153,7 +153,11 @@ export async function ensureFreshBars(lat: number, lng: number): Promise<void> {
     try {
       const res = await fetch(`${fastapiUrl}/bars/pipeline/nearby`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          // 서버 전용 시크릿 (NEXT_PUBLIC_ 금지)
+          "X-Internal-Secret": process.env.INTERNAL_API_SECRET ?? "",
+        },
         body: JSON.stringify({ lat, lng, radius: NEARBY_RADIUS_M, count: 40 }),
         signal: AbortSignal.timeout(50_000),
       });

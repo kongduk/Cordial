@@ -1,8 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getAuthUser } from "@/server/auth/getUser";
+import { checkSameOrigin } from "@/shared/lib/internalAuth";
+import { checkRateLimit } from "@/shared/lib/rateLimit";
 
 export async function GET(req: NextRequest) {
   const area = req.nextUrl.searchParams.get("area");
   if (!area || area.length > 100) return NextResponse.json({ error: "area 파라미터가 필요합니다." }, { status: 400 });
+
+  const originError = checkSameOrigin(req);
+  if (originError) return originError;
+  const authUser = await getAuthUser(req);
+  const rateLimitError = await checkRateLimit(req, "bars-geocode", authUser?.email, authUser?.id);
+  if (rateLimitError) return rateLimitError;
 
   try {
     const key = process.env.GOOGLE_MAPS_API_KEY;

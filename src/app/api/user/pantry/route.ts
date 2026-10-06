@@ -1,11 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getToken } from "next-auth/jwt";
+import { getUserId } from "@/server/auth/getUser";
 import { prisma } from "@/shared/lib/prisma";
-
-async function getUserId(req: NextRequest): Promise<string | undefined> {
-  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-  return (token?.id ?? token?.sub) as string | undefined;
-}
 
 export async function GET(req: NextRequest) {
   const userId = await getUserId(req);
@@ -29,7 +24,7 @@ export async function PUT(req: NextRequest) {
 
   try {
     const body = await req.json() as { pantry: unknown };
-    if (!Array.isArray(body.pantry) || !body.pantry.every(i => typeof i === "string")) {
+    if (!Array.isArray(body.pantry) || body.pantry.length > 200 || !body.pantry.every(i => typeof i === "string" && i.length <= 100)) {
       return NextResponse.json({ error: "pantry는 문자열 배열이어야 합니다." }, { status: 400 });
     }
 

@@ -1,15 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getToken } from "next-auth/jwt";
+import { getUserId } from "@/server/auth/getUser";
 import { prisma } from "@/shared/lib/prisma";
 import type { DrinkingCapacity } from "@/shared/types";
 
-function getUserId(token: Awaited<ReturnType<typeof getToken>>): string | undefined {
-  return (token?.id ?? token?.sub) as string | undefined;
-}
-
 export async function GET(req: NextRequest) {
-  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-  const userId = getUserId(token);
+  const userId = await getUserId(req);
   if (!userId) return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
 
   try {
@@ -39,8 +34,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
-  const userId = getUserId(token);
+  const userId = await getUserId(req);
   if (!userId) return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
 
   try {

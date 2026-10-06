@@ -4,7 +4,6 @@ const api = axios.create({
   baseURL: "/api",
   headers: {
     "Content-Type": "application/json",
-    "x-internal-secret": process.env.NEXT_PUBLIC_INTERNAL_API_SECRET ?? "",
   },
 });
 

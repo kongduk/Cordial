@@ -2,6 +2,7 @@ import os
 import re
 import asyncio
 import httpx
+from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 
 NAVER_CLIENT_ID = os.getenv("NAVER_CLIENT_ID", "")
@@ -48,8 +49,21 @@ def _parse_blog_content(html: str) -> str:
     return soup.get_text(" ", strip=True)[:1500]
 
 
+_ALLOWED_BLOG_HOSTS = {"blog.naver.com", "m.blog.naver.com"}
+
+
+def _is_allowed_blog_url(url: str) -> bool:
+    try:
+        u = urlparse(url)
+    except Exception:
+        return False
+    return u.scheme in ("http", "https") and (u.hostname or "").lower() in _ALLOWED_BLOG_HOSTS
+
+
 async def _fetch_blog_content(url: str, client: httpx.AsyncClient) -> str:
     """블로그 URL에서 본문 전체 크롤링"""
+    if not _is_allowed_blog_url(url):
+        return ""  # SSRF 방지: 네이버 블로그 호스트만 허용
     try:
         # 네이버 블로그 → 모바일 URL로 변환 (iframe 없이 본문 직접 접근)
         mobile_url = re.sub(
@@ -59,9 +73,9 @@ async def _fetch_blog_content(url: str, client: httpx.AsyncClient) -> str:
         )
         target = mobile_url if "m.blog.naver.com" in mobile_url else url
         res = await client.get(target, headers=_HEADERS, timeout=8, follow_redirects=True)
-        if res.status_code != 200:
+        if res.status_code != 200 or not _is_allowed_blog_url(str(res.url)):
             return ""
-        return _parse_blog_content(res.text)
+        return _parse_blog_content(res.text[:500_000])
     except Exception:
         return ""
 
@@ -109,5 +123,5 @@ async def search_naver_blog_reviews(bar_name: str, area: str, count: int = 5) ->
             return results
 
     except Exception as e:
-        print(f"[Naver Blog] 실패: {bar_name} ({e})")
+        print(f"[Naver Blog] 실패: {bar_name} ({type(e).__name__})")
         return []
