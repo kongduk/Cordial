@@ -10,6 +10,7 @@ import { GlassSilhouette } from "@/shared/ui/GlassSilhouette";
 import { MobileTabBar } from "@/shared/ui/MobileTabBar";
 import type { GlassType } from "@/shared/ui/GlassSilhouette";
 import { W, T } from "@/shared/lib/theme";
+import { getApiErrorMessage } from "@/shared/lib/apiError";
 
 const toTitleCase = (s: string) => s.toLowerCase().replace(/\b\w/g, l => l.toUpperCase());
 
@@ -55,10 +56,12 @@ export default function CocktailsPage() {
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("전체");
 
-  const { data: cocktails = [], isLoading: loading } = useQuery({
+  const { data: cocktails = [], isLoading: loading, isError, error, refetch } = useQuery({
     queryKey: ["cocktails"],
     queryFn: () => api.get<CocktailItem[]>("/cocktails").then(r => r.data),
   });
+
+  const errMsg = isError ? getApiErrorMessage(error, "칵테일 목록을 불러오지 못했어요.") : null;
 
   const filtered = useMemo(() => {
     let items = cocktails;
@@ -91,7 +94,7 @@ export default function CocktailsPage() {
             <div style={{ fontFamily: W.mono, fontSize: 10, letterSpacing: 1.8, color: W.accent, marginBottom: 14, textTransform: "uppercase" }}>All Cocktails</div>
             <h1 style={{ fontSize: 44, fontWeight: 600, letterSpacing: -1, lineHeight: 1.1, margin: "0 0 14px" }}>전체 칵테일</h1>
             <p style={{ fontSize: 15, color: W.textMuted, margin: 0 }}>
-              {loading ? "로딩 중..." : `${cocktails.length}가지 칵테일`}
+              {loading ? "로딩 중..." : isError ? "불러오기 실패" : `${cocktails.length}가지 칵테일`}
             </p>
           </div>
 
@@ -124,6 +127,11 @@ export default function CocktailsPage() {
 
           {loading ? (
             <div style={{ textAlign: "center", padding: "60px 0", color: W.textFaint, fontFamily: W.mono, fontSize: 12, letterSpacing: 0.5 }}>LOADING...</div>
+          ) : errMsg ? (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, padding: "60px 0", color: W.textMuted, fontSize: 14 }}>
+              <span>{errMsg}</span>
+              <button onClick={() => { void refetch(); }} style={{ padding: "10px 20px", borderRadius: 10, background: W.text, color: W.bg, border: "none", fontSize: 14, fontWeight: 600, fontFamily: W.sans, cursor: "pointer" }}>다시 시도</button>
+            </div>
           ) : filtered.length === 0 ? (
             <div style={{ textAlign: "center", padding: "60px 0", color: W.textMuted, fontSize: 14 }}>검색 결과가 없어요.</div>
           ) : (
@@ -191,7 +199,7 @@ export default function CocktailsPage() {
           <div style={{ padding: "8px 24px 20px" }}>
             <h1 style={{ fontSize: 28, fontWeight: 600, letterSpacing: -0.6, margin: 0, lineHeight: 1.2 }}>전체 칵테일</h1>
             <p style={{ fontSize: 13, color: T.darkTextMuted, margin: "8px 0 0" }}>
-              {loading ? "로딩 중..." : `${cocktails.length}가지`}
+              {loading ? "로딩 중..." : isError ? "불러오기 실패" : `${cocktails.length}가지`}
             </p>
           </div>
 
@@ -226,6 +234,11 @@ export default function CocktailsPage() {
           {/* List */}
           {loading ? (
             <div style={{ textAlign: "center", padding: "40px 0", color: T.darkTextFaint, fontFamily: T.mono, fontSize: 12 }}>LOADING...</div>
+          ) : errMsg ? (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, padding: "40px 24px", color: T.darkTextMuted, fontSize: 14, textAlign: "center" }}>
+              <span>{errMsg}</span>
+              <button onClick={() => { void refetch(); }} style={{ padding: "10px 20px", borderRadius: 10, background: T.darkText, color: T.darkBg, border: "none", fontSize: 14, fontWeight: 600, fontFamily: T.sans, cursor: "pointer" }}>다시 시도</button>
+            </div>
           ) : filtered.length === 0 ? (
             <div style={{ textAlign: "center", padding: "40px 0", color: T.darkTextMuted, fontSize: 14 }}>검색 결과가 없어요.</div>
           ) : (

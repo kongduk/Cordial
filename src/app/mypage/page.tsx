@@ -11,6 +11,7 @@ import { WebNav } from "@/shared/ui/WebNav";
 import { MobileTabBar } from "@/shared/ui/MobileTabBar";
 import type { DrinkingCapacity } from "@/shared/types";
 import { W, T } from "@/shared/lib/theme";
+import { getApiErrorMessage } from "@/shared/lib/apiError";
 
 interface SavedCocktail {
   id: string;
@@ -52,12 +53,13 @@ export default function MyPage() {
   const router = useRouter();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     if (status === "unauthenticated") router.replace("/login");
   }, [status, router]);
 
-  const { isLoading: loading, data: profileData } = useQuery({
+  const { isLoading: loading, data: profileData, isError: profileError, error: profileErr, refetch: refetchProfile } = useQuery({
     queryKey: ["profile"],
     queryFn: () => api.get<Profile>("/user/profile").then(r => r.data),
     enabled: status === "authenticated",
@@ -67,7 +69,7 @@ export default function MyPage() {
     if (profileData) setProfile(prev => prev ?? profileData);
   }, [profileData]);
 
-  const { data: savedCocktails = [] } = useQuery<SavedCocktail[]>({
+  const { data: savedCocktails = [], isError: savedError, refetch: refetchSaved } = useQuery<SavedCocktail[]>({
     queryKey: ["user-cocktails"],
     queryFn: () => api.get<SavedCocktail[]>("/user/cocktails").then(r => r.data),
     enabled: status === "authenticated",
@@ -75,7 +77,9 @@ export default function MyPage() {
 
   const saveMutation = useMutation({
     mutationFn: (data: Omit<Profile, "name" | "email">) => api.patch("/user/profile", data),
+    onMutate: () => setSaveError(null),
     onSuccess: () => { setSaved(true); setTimeout(() => setSaved(false), 2000); },
+    onError: (e: unknown) => setSaveError(getApiErrorMessage(e, "저장하지 못했어요. 다시 시도해 주세요.")),
   });
 
   const saving = saveMutation.isPending;
@@ -91,6 +95,7 @@ export default function MyPage() {
   }
 
   const isLoading = status === "loading" || loading;
+  const profileErrMsg = profileError ? getApiErrorMessage(profileErr, "프로필을 불러오지 못했어요.") : null;
 
   return (
     <>
@@ -101,7 +106,12 @@ export default function MyPage() {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "calc(100vh - 60px)" }}>
             <p style={{ color: W.textMuted, fontSize: 14 }}>불러오는 중...</p>
           </div>
-        ) : !profile ? null : (
+        ) : !profile ? (profileErrMsg && (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, minHeight: "calc(100vh - 60px)" }}>
+            <p style={{ color: W.textMuted, fontSize: 14, margin: 0 }}>{profileErrMsg}</p>
+            <button onClick={() => { void refetchProfile(); }} style={{ padding: "10px 20px", borderRadius: 10, background: W.text, color: W.bg, border: "none", fontSize: 14, fontWeight: 600, fontFamily: W.sans, cursor: "pointer" }}>다시 시도</button>
+          </div>
+        )) : (
           <div style={{ maxWidth: 640, margin: "0 auto", padding: "48px 24px 80px" }}>
             <div style={{ marginBottom: 40 }}>
               <div style={{ fontFamily: W.mono, fontSize: 11, letterSpacing: 1.8, color: W.accent, marginBottom: 10, textTransform: "uppercase" }}>MY PROFILE</div>
@@ -154,9 +164,15 @@ export default function MyPage() {
               </div>
             </section>
 
-            {savedCocktails.length > 0 && (
+            {(savedCocktails.length > 0 || savedError) && (
               <section style={{ marginBottom: 40 }}>
                 <div style={{ fontFamily: W.mono, fontSize: 10, letterSpacing: 1.4, color: W.textMuted, marginBottom: 16, textTransform: "uppercase" }}>나의 레시피</div>
+                {savedError && (
+                  <p style={{ fontSize: 13, color: W.textMuted, margin: 0 }}>
+                    레시피를 불러오지 못했어요.{" "}
+                    <button onClick={() => { void refetchSaved(); }} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: W.accent, textDecoration: "underline", fontSize: 13, fontFamily: W.sans }}>다시 시도</button>
+                  </p>
+                )}
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {savedCocktails.map(c => (
                     <Link key={c.id} href={`/cocktail/${c.id}`} style={{ textDecoration: "none" }}>
@@ -175,6 +191,7 @@ export default function MyPage() {
               </section>
             )}
 
+            {saveError && <p role="alert" style={{ margin: "0 0 12px", fontSize: 13, color: W.accent, textAlign: "center" }}>{saveError}</p>}
             <button onClick={handleSave} disabled={saving} style={{
               width: "100%", height: 52, borderRadius: 12,
               background: saved ? "#4CAF50" : W.text, color: W.bg,
@@ -212,7 +229,12 @@ export default function MyPage() {
 
           {isLoading ? (
             <div style={{ textAlign: "center", padding: "60px 0", color: T.darkTextMuted, fontSize: 14 }}>불러오는 중...</div>
-          ) : !profile ? null : (
+          ) : !profile ? (profileErrMsg && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16, padding: "60px 24px" }}>
+              <p style={{ color: T.darkTextMuted, fontSize: 14, margin: 0, textAlign: "center" }}>{profileErrMsg}</p>
+              <button onClick={() => { void refetchProfile(); }} style={{ padding: "10px 20px", borderRadius: 10, background: T.darkText, color: T.darkBg, border: "none", fontSize: 14, fontWeight: 600, fontFamily: T.sans, cursor: "pointer" }}>다시 시도</button>
+            </div>
+          )) : (
             <div style={{ padding: "8px 24px" }}>
               {/* Profile info */}
               <div style={{ marginBottom: 32 }}>
@@ -268,9 +290,15 @@ export default function MyPage() {
               </div>
 
               {/* Saved recipes */}
-              {savedCocktails.length > 0 && (
+              {(savedCocktails.length > 0 || savedError) && (
                 <div style={{ marginBottom: 32 }}>
                   <div style={{ fontFamily: T.mono, fontSize: 10, letterSpacing: 1.4, color: T.darkTextMuted, marginBottom: 14, textTransform: "uppercase" }}>나의 레시피</div>
+                  {savedError && (
+                    <p style={{ fontSize: 13, color: T.darkTextMuted, margin: 0 }}>
+                      레시피를 불러오지 못했어요.{" "}
+                      <button onClick={() => { void refetchSaved(); }} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: T.accent, textDecoration: "underline", fontSize: 13, fontFamily: T.sans }}>다시 시도</button>
+                    </p>
+                  )}
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {savedCocktails.map(c => (
                       <Link key={c.id} href={`/cocktail/${c.id}`} style={{ textDecoration: "none" }}>
@@ -290,6 +318,7 @@ export default function MyPage() {
               )}
 
               {/* Save button */}
+              {saveError && <p role="alert" style={{ margin: "0 0 12px", fontSize: 13, color: T.accent, textAlign: "center" }}>{saveError}</p>}
               <button onClick={handleSave} disabled={saving} style={{
                 width: "100%", height: 52, borderRadius: 12,
                 background: saved ? "#4CAF50" : T.darkText, color: T.darkBg,

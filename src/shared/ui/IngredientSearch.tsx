@@ -23,6 +23,8 @@ export function IngredientSearch({ dark, onSelect, placeholder = "재료 검색.
   const [options, setOptions] = useState<IngredientOption[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [searchError, setSearchError] = useState(false);
+  const seqRef = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -33,20 +35,28 @@ export function IngredientSearch({ dark, onSelect, placeholder = "재료 검색.
   const hoverBg   = dark ? "rgba(255,246,232,0.06)" : "rgba(40,30,20,0.04)";
 
   const search = useCallback(async (q: string) => {
+    const seq = ++seqRef.current; // 오래된 응답이 최신 결과를 덮어쓰지 않도록
     setLoading(true);
     try {
       const res = await fetch(`/api/ingredients/search?q=${encodeURIComponent(q)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const raw = await res.json() as unknown;
+      if (seq !== seqRef.current) return;
       setOptions(Array.isArray(raw) ? (raw as IngredientOption[]) : []);
+      setSearchError(false);
     } catch {
+      if (seq !== seqRef.current) return;
       setOptions([]);
+      setSearchError(true);
     } finally {
-      setLoading(false);
+      if (seq === seqRef.current) setLoading(false);
     }
   }, []);
 
+  // 열릴 때와 입력이 바뀔 때 한 번만 검색 (포커스 핸들러에서 중복 호출하지 않음)
   useEffect(() => {
-    const t = setTimeout(() => { if (open) search(query); }, 200);
+    if (!open) return;
+    const t = setTimeout(() => { void search(query); }, 200);
     return () => clearTimeout(t);
   }, [query, open, search]);
 
@@ -62,7 +72,6 @@ export function IngredientSearch({ dark, onSelect, placeholder = "재료 검색.
 
   function handleFocus() {
     setOpen(true);
-    search(query);
   }
 
   function handleSelect(item: IngredientOption) {
@@ -115,6 +124,13 @@ export function IngredientSearch({ dark, onSelect, placeholder = "재료 검색.
         }}>
           {options.length === 0 && !loading && query.length === 0 && (
             <div style={{ padding: "10px 14px", fontSize: 12, color: textMuted }}>재료 이름을 입력하세요</div>
+          )}
+
+          {searchError && !loading && (
+            <div style={{ padding: "10px 14px", fontSize: 12, color: textMuted }}>검색에 실패했어요. 잠시 후 다시 입력해 주세요.</div>
+          )}
+          {!searchError && options.length === 0 && !loading && query.trim().length > 0 && (
+            <div style={{ padding: "10px 14px", fontSize: 12, color: textMuted }}>검색 결과가 없어요.</div>
           )}
 
           {options.map(opt => (

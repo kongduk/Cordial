@@ -14,6 +14,7 @@ import type { GlassType } from "@/shared/ui/GlassSilhouette";
 import type { IngredientOption } from "@/shared/ui/IngredientSearch";
 import type { RecommendedCocktail } from "@/shared/types";
 import { W, T } from "@/shared/lib/theme";
+import { getApiErrorMessage } from "@/shared/lib/apiError";
 
 
 interface PantryResult {
@@ -45,41 +46,76 @@ export default function PantryPage() {
 
   const [owned, setOwned] = useState<string[]>([]);
   const [loadingPantry, setLoadingPantry] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const [result, setResult] = useState<PantryResult | null>(null);
+  const [matchError, setMatchError] = useState<string | null>(null);
+  const [debouncing, setDebouncing] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
   const [showSearchWeb, setShowSearchWeb] = useState(false);
   const [showSearchMob, setShowSearchMob] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const matchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestMatchRef = useRef<string[] | null>(null);
+  const ownedRef = useRef<string[]>([]);
+  ownedRef.current = owned;
 
   const matchMutation = useMutation({
     mutationFn: (ingredients: string[]) =>
       api.post<PantryResult>("/ai/pantry-recommend", { ingredients }).then(r => r.data),
-    onSuccess: (data) => setResult(data),
-    onError: () => setResult(null),
+    onMutate: () => setMatchError(null),
+    onSuccess: (data, ingredients) => {
+      if (latestMatchRef.current !== ingredients) return; // 오래된 응답 무시
+      setResult(data);
+    },
+    onError: (e: unknown, ingredients) => {
+      if (latestMatchRef.current !== ingredients) return;
+      setResult(null);
+      setMatchError(getApiErrorMessage(e, "추천을 불러오지 못했어요. 다시 시도해 주세요."));
+    },
   });
 
-  const matchLoading = matchMutation.isPending;
+  const matchLoading = matchMutation.isPending || debouncing;
 
-  // 매칭 요청
-  const fetchMatches = useCallback((ingredients: string[]) => {
-    if (ingredients.length === 0) { setResult(null); return; }
-    matchMutation.mutate(ingredients);
+  // 매칭 요청 (delay > 0 이면 디바운스)
+  const fetchMatches = useCallback((ingredients: string[], delay = 0) => {
+    if (matchTimerRef.current) { clearTimeout(matchTimerRef.current); matchTimerRef.current = null; }
+    latestMatchRef.current = ingredients;
+    if (ingredients.length === 0) { setResult(null); setMatchError(null); setDebouncing(false); return; }
+    if (delay <= 0) { setDebouncing(false); matchMutation.mutate(ingredients); return; }
+    setDebouncing(true);
+    matchTimerRef.current = setTimeout(() => {
+      matchTimerRef.current = null;
+      setDebouncing(false);
+      matchMutation.mutate(ingredients);
+    }, delay);
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => () => {
+    if (matchTimerRef.current) clearTimeout(matchTimerRef.current);
+  }, []);
+
+  // DB 저장 (로그인 시)
+  const putPantry = useCallback((items: string[]) => {
+    api.put("/user/pantry", { pantry: items })
+      .then(() => { if (ownedRef.current === items) setSaveFailed(false); })
+      .catch(() => setSaveFailed(true));
   }, []);
 
   // DB 저장 (로그인 시, 디바운스)
   const saveToDB = useCallback((items: string[]) => {
     if (!isLoggedIn) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      api.put("/user/pantry", { pantry: items }).catch(() => {});
-    }, 800);
-  }, [isLoggedIn]);
+    saveTimerRef.current = setTimeout(() => putPantry(items), 800);
+  }, [isLoggedIn, putPantry]);
 
   // 초기 로드
   useEffect(() => {
     if (status === "loading") return;
 
     async function loadPantry() {
+      setLoadError(null);
       if (isLoggedIn) {
         try {
           const res = await api.get<{ pantry: string[] }>("/user/pantry");
@@ -87,9 +123,9 @@ export default function PantryPage() {
           const items = data.pantry.length > 0 ? data.pantry : DEFAULT_PANTRY;
           setOwned(items);
           fetchMatches(items);
-        } catch {
-          setOwned(DEFAULT_PANTRY);
-          fetchMatches(DEFAULT_PANTRY);
+        } catch (e: unknown) {
+          // 불러오기 실패 시 기본 재료로 덮어쓰지 않도록 편집을 막고 오류만 보여준다
+          setLoadError(getApiErrorMessage(e, "내 술장을 불러오지 못했어요."));
         }
       } else {
         const saved = localStorage.getItem(STORAGE_KEY);
@@ -111,11 +147,17 @@ export default function PantryPage() {
     }
 
     loadPantry();
-  }, [status, isLoggedIn, fetchMatches]);
+  }, [status, isLoggedIn, fetchMatches, reloadKey]);
+
+  function retryLoad() {
+    setLoadingPantry(true);
+    setReloadKey(k => k + 1);
+  }
 
   function applyItems(next: string[]) {
     setOwned(next);
-    fetchMatches(next);
+    ownedRef.current = next;
+    fetchMatches(next, 600);
     if (isLoggedIn) {
       saveToDB(next);
     } else {
@@ -149,6 +191,33 @@ export default function PantryPage() {
     );
   }
 
+  if (loadError) {
+    return (
+      <>
+        <div className="cordial-web" style={{ background: W.bg, minHeight: "100dvh", fontFamily: W.sans, display: "flex", flexDirection: "column" }}>
+          <WebNav active="/pantry" />
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: "0 24px" }}>
+            <p style={{ fontSize: 16, color: W.textMuted, textAlign: "center", margin: 0 }}>{loadError}</p>
+            <p style={{ fontSize: 13, color: W.textFaint, textAlign: "center", margin: 0 }}>저장된 재료를 지키기 위해 불러오기 전에는 수정할 수 없어요.</p>
+            <button onClick={retryLoad} style={{ padding: "12px 24px", borderRadius: 12, background: W.accent, color: W.bg, border: "none", fontSize: 14, fontWeight: 600, fontFamily: W.sans, cursor: "pointer" }}>다시 시도하기</button>
+          </div>
+        </div>
+        <div className="cordial-mob">
+          <div style={{ background: T.darkBg, minHeight: "100dvh", color: T.darkText, fontFamily: T.sans, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: "0 24px" }}>
+            <p style={{ fontSize: 16, color: T.darkTextMuted, textAlign: "center", margin: 0 }}>{loadError}</p>
+            <p style={{ fontSize: 13, color: T.darkTextFaint, textAlign: "center", margin: 0 }}>저장된 재료를 지키기 위해 불러오기 전에는 수정할 수 없어요.</p>
+            <button onClick={retryLoad} style={{ padding: "12px 24px", borderRadius: 14, background: T.accent, color: T.darkBg, border: "none", fontSize: 14, fontWeight: 600, fontFamily: T.sans, cursor: "pointer" }}>다시 시도하기</button>
+          </div>
+          <MobileTabBar active="pantry" />
+        </div>
+      </>
+    );
+  }
+
+  const saveRetry = (color: string) => saveFailed && (
+    <button onClick={() => putPantry(ownedRef.current)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 12, color, fontFamily: "inherit", textDecoration: "underline" }}>저장 실패 — 다시 시도</button>
+  );
+
   return (
     <>
       {/* ── WEB ── */}
@@ -159,8 +228,8 @@ export default function PantryPage() {
             <div style={{ fontFamily: W.mono, fontSize: 10, letterSpacing: 1.8, color: W.accent, marginBottom: 14, textTransform: "uppercase" }}>My Pantry</div>
             <h1 style={{ fontSize: 44, fontWeight: 600, letterSpacing: -1, lineHeight: 1.1, margin: "0 0 14px" }}>가진 재료로<br />만들 수 있는 한 잔.</h1>
             <p style={{ fontSize: 15, color: W.textMuted, margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
-              {owned.length}가지 재료로 {matchLoading ? "확인 중..." : `${exactCount}잔이 가능해요.`}
-              {isLoggedIn && <span style={{ fontSize: 12, color: W.accent, fontFamily: W.mono }}>· 자동 저장됨</span>}
+              {owned.length}가지 재료로 {matchLoading ? "확인 중..." : matchError ? "추천을 불러오지 못했어요." : `${exactCount}잔이 가능해요.`}
+              {isLoggedIn && (saveFailed ? saveRetry(W.accent) : <span style={{ fontSize: 12, color: W.accent, fontFamily: W.mono }}>· 자동 저장됨</span>)}
             </p>
           </div>
 
@@ -173,7 +242,7 @@ export default function PantryPage() {
                 {owned.map((item) => (
                   <div key={item} style={{ padding: "8px 10px 8px 14px", borderRadius: 100, background: W.surface, border: `0.5px solid ${W.borderStrong}`, display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
                     {item}
-                    <button onClick={() => removeItem(item)} style={{ background: "none", border: "none", cursor: "pointer", color: W.textFaint, fontSize: 14, lineHeight: 1, padding: "0 2px" }}>×</button>
+                    <button onClick={() => removeItem(item)} aria-label={`${item} 삭제`} style={{ background: "none", border: "none", cursor: "pointer", color: W.textFaint, fontSize: 16, lineHeight: 1, padding: "8px 10px", margin: "-8px -10px -8px -2px", minWidth: 32, minHeight: 32 }}>×</button>
                   </div>
                 ))}
               </div>
@@ -193,6 +262,12 @@ export default function PantryPage() {
               {matchLoading ? (
                 <div style={{ display: "flex", justifyContent: "center", padding: "40px 0", color: W.textFaint, fontFamily: W.mono, fontSize: 12, letterSpacing: 0.5 }}>MATCHING...</div>
               ) : (
+                matchError ? (
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 12, padding: "24px 0" }}>
+                    <p style={{ margin: 0, fontSize: 14, color: W.textMuted }}>{matchError}</p>
+                    <button onClick={() => fetchMatches(owned)} style={{ padding: "10px 18px", borderRadius: 10, border: `0.5px solid ${W.borderStrong}`, background: "transparent", fontSize: 13, color: W.text, fontFamily: W.sans, cursor: "pointer" }}>다시 시도</button>
+                  </div>
+                ) : (
                 <>
                   <div style={{ fontFamily: W.mono, fontSize: 10, letterSpacing: 1.6, color: W.textFaint, marginBottom: 16, textTransform: "uppercase" }}>MATCHES · {exactCount}</div>
                   {result?.exact.length === 0 && (
@@ -246,6 +321,7 @@ export default function PantryPage() {
                     </div>
                   )}
                 </>
+                )
               )}
             </div>
           </div>
@@ -266,8 +342,8 @@ export default function PantryPage() {
           <div style={{ padding: "8px 24px 16px" }}>
             <h1 style={{ fontSize: 28, fontWeight: 600, letterSpacing: -0.6, margin: 0, lineHeight: 1.2 }}>가진 재료로<br />만들 수 있는 한 잔.</h1>
             <p style={{ fontSize: 13, color: T.darkTextMuted, marginTop: 10, lineHeight: 1.6 }}>
-              {owned.length}가지 재료 · {matchLoading ? "확인 중..." : `${exactCount}잔 가능`}
-              {isLoggedIn && <span style={{ color: T.accent, marginLeft: 6 }}>· 저장됨</span>}
+              {owned.length}가지 재료 · {matchLoading ? "확인 중..." : matchError ? "불러오기 실패" : `${exactCount}잔 가능`}
+              {isLoggedIn && (saveFailed ? <span style={{ marginLeft: 6 }}>{saveRetry(T.accent)}</span> : <span style={{ color: T.accent, marginLeft: 6 }}>· 저장됨</span>)}
             </p>
           </div>
 
@@ -277,7 +353,7 @@ export default function PantryPage() {
               {owned.map((item) => (
                 <div key={item} style={{ padding: "8px 10px 8px 14px", borderRadius: 100, background: T.darkSurface, border: `0.5px solid ${T.darkBorderStrong}`, display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
                   {item}
-                  <button onClick={() => removeItem(item)} style={{ background: "none", border: "none", cursor: "pointer", color: T.darkTextFaint, fontSize: 14, lineHeight: 1, padding: "0 2px" }}>×</button>
+                  <button onClick={() => removeItem(item)} aria-label={`${item} 삭제`} style={{ background: "none", border: "none", cursor: "pointer", color: T.darkTextFaint, fontSize: 16, lineHeight: 1, padding: "8px 10px", margin: "-8px -10px -8px -2px", minWidth: 32, minHeight: 32 }}>×</button>
                 </div>
               ))}
             </div>
@@ -294,6 +370,11 @@ export default function PantryPage() {
 
           {matchLoading ? (
             <div style={{ textAlign: "center", padding: "24px", color: T.darkTextFaint, fontFamily: T.mono, fontSize: 12 }}>MATCHING...</div>
+          ) : matchError ? (
+            <div style={{ padding: "0 24px", display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 12 }}>
+              <p style={{ margin: 0, fontSize: 13, color: T.darkTextMuted }}>{matchError}</p>
+              <button onClick={() => fetchMatches(owned)} style={{ padding: "10px 18px", borderRadius: 10, border: `0.5px solid ${T.darkBorderStrong}`, background: "transparent", fontSize: 13, color: T.darkText, fontFamily: T.sans, cursor: "pointer" }}>다시 시도</button>
+            </div>
           ) : (
             <div style={{ padding: "0 24px" }}>
               <div style={{ fontFamily: T.mono, fontSize: 10, letterSpacing: 1.6, color: T.darkTextFaint, marginBottom: 14, textTransform: "uppercase" }}>MATCHES · {exactCount}</div>
