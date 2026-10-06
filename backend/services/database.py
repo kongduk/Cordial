@@ -1,4 +1,5 @@
 import os
+import re
 import secrets
 import httpx
 
@@ -32,7 +33,7 @@ async def upsert_bar(bar_data: dict) -> dict:
             timeout=10,
         )
         if not res.is_success:
-            print(f"[DB ERROR] status={res.status_code} body={res.text}")
+            print(f"[DB ERROR] status={res.status_code} body={res.text[:300]}")
             res.raise_for_status()
         result = res.json()
         return result[0] if isinstance(result, list) and result else {}
@@ -44,6 +45,9 @@ _VALID_MOODS = {"조용한", "활기찬", "로맨틱", "힙한", "클래식"}
 async def get_bars(area: str | None = None, mood: str | None = None) -> list[dict]:
     """Supabase REST API로 바 목록 조회"""
     params = {"order": "createdAt.desc", "limit": "50"}
+    if area:
+        # PostgREST 필터 구문 문자(와일드카드/구분자/괄호) 제거
+        area = re.sub(r"[^0-9A-Za-z가-힣 _-]", "", area)[:50].strip()
     if area:
         params["area"] = f"ilike.*{area}*"
     if mood and mood in _VALID_MOODS:

@@ -47,7 +47,9 @@ def _fetch_instagram_sync(bar_name: str, area: str, count: int) -> list[str]:
 async def search_instagram_posts(bar_name: str, area: str, count: int = 5) -> list[str]:
     """Instagram 해시태그 기반 캡션 수집 (비동기 래퍼)"""
     try:
-        return await asyncio.to_thread(_fetch_instagram_sync, bar_name, area, count)
+        return await asyncio.wait_for(
+            asyncio.to_thread(_fetch_instagram_sync, bar_name, area, count), timeout=20
+        )
     except Exception as e:
-        print(f"[Instagram] 실패: {bar_name} ({e})")
+        print(f"[Instagram] 실패: {bar_name} ({type(e).__name__})")
         return []

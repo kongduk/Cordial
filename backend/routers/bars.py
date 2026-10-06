@@ -1,5 +1,6 @@
 import asyncio
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from security import require_internal_secret
 from pydantic import BaseModel, Field
 from services.google_maps import search_nearby_bars, search_bars_by_text, get_place_reviews, extract_bar_base
 from services.gemini import analyze_bar
@@ -7,7 +8,10 @@ from services.database import upsert_bar, get_bars
 from services.naver_blog import search_naver_blog_reviews
 from services.instagram import search_instagram_posts
 
-router = APIRouter(prefix="/bars", tags=["bars"])
+router = APIRouter(prefix="/bars", tags=["bars"], dependencies=[Depends(require_internal_secret)])
+
+# 유료 외부 API(Google/Gemini/Naver) 동시 파이프라인 수 제한
+_pipeline_sem = asyncio.Semaphore(2)
 
 
 class NearbyRequest(BaseModel):
@@ -18,7 +22,7 @@ class NearbyRequest(BaseModel):
 
 
 class TextSearchRequest(BaseModel):
-    query: str = Field(..., min_length=1, max_length=100)
+    query: str = Field(..., min_length=1, max_length=100, pattern=r"^[^\x00-\x1f]+$")
     count: int = Field(default=20, ge=1, le=40)
 
 
@@ -67,17 +71,18 @@ async def process_place(place: dict) -> dict | None:
 @router.post("/pipeline/nearby")
 async def pipeline_nearby(req: NearbyRequest):
     """위도/경도 기반 주변 칵테일 바 수집 → Gemini 분석 → DB 저장"""
-    places = await search_nearby_bars(req.lat, req.lng, req.radius)
-    if not places:
-        raise HTTPException(status_code=404, detail="주변에 바를 찾을 수 없습니다.")
+    async with _pipeline_sem:
+        places = await search_nearby_bars(req.lat, req.lng, req.radius)
+        if not places:
+            raise HTTPException(status_code=404, detail="주변에 바를 찾을 수 없습니다.")
 
-    results = []
-    for i, place in enumerate(places[:req.count]):
-        bar = await process_place(place)
-        if bar:
-            results.append(bar)
-        if (i + 1) % 5 == 0:
-            await asyncio.sleep(2)  # Gemini rate limit 방지
+        results = []
+        for i, place in enumerate(places[:req.count]):
+            bar = await process_place(place)
+            if bar:
+                results.append(bar)
+            if (i + 1) % 5 == 0:
+                await asyncio.sleep(2)  # Gemini rate limit 방지
 
     return {"processed": len(results), "bars": results}
 
@@ -87,17 +92,18 @@ async def pipeline_search(req: TextSearchRequest):
     """텍스트 검색 기반 칵테일 바 수집 → Gemini 분석 → DB 저장
     예: { "query": "해운대 칵테일바", "count": 20 }
     """
-    places = await search_bars_by_text(req.query, req.count)
-    if not places:
-        raise HTTPException(status_code=404, detail="검색 결과가 없습니다.")
+    async with _pipeline_sem:
+        places = await search_bars_by_text(req.query, req.count)
+        if not places:
+            raise HTTPException(status_code=404, detail="검색 결과가 없습니다.")
 
-    results = []
-    for i, place in enumerate(places):
-        bar = await process_place(place)
-        if bar:
-            results.append(bar)
-        if (i + 1) % 5 == 0:
-            await asyncio.sleep(2)  # Gemini rate limit 방지
+        results = []
+        for i, place in enumerate(places):
+            bar = await process_place(place)
+            if bar:
+                results.append(bar)
+            if (i + 1) % 5 == 0:
+                await asyncio.sleep(2)  # Gemini rate limit 방지
 
     return {"processed": len(results), "bars": results}
 
@@ -116,6 +122,7 @@ async def re_analyze_bars():
             params={"select": "id,name,address", "limit": "200"},
             timeout=15,
         )
+        res.raise_for_status()
         bars = res.json()
 
     updated = 0
@@ -140,7 +147,10 @@ async def re_analyze_bars():
 
 
 @router.get("/")
-async def list_bars(area: str | None = None, mood: str | None = None):
+async def list_bars(
+    area: str | None = Query(default=None, max_length=50),
+    mood: str | None = Query(default=None, max_length=20),
+):
     """저장된 바 목록 조회"""
     bars = await get_bars(area=area, mood=mood)
     return bars
