@@ -1,20 +1,27 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+import logging
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routers import bars
-from security import is_production
+from security import allow_insecure_dev, docs_enabled
 
-# 프로덕션에서는 Swagger/ReDoc/OpenAPI 스키마 비노출
-_docs = {} if not is_production() else {"docs_url": None, "redoc_url": None, "openapi_url": None}
+logger = logging.getLogger("uvicorn.error")
+if allow_insecure_dev():
+    logger.warning("ALLOW_INSECURE_DEV=1: 인증 없이 동작할 수 있는 INSECURE 모드입니다. 로컬 개발에서만 사용하세요.")
+if not os.getenv("INTERNAL_API_SECRET") and not allow_insecure_dev():
+    logger.warning("INTERNAL_API_SECRET 미설정: 보호된 엔드포인트는 503 을 반환합니다.")
+
+# ENVIRONMENT=development 또는 ALLOW_INSECURE_DEV=1 이 아니면 Swagger/ReDoc/OpenAPI 스키마 비노출
+_docs = {} if docs_enabled() else {"docs_url": None, "redoc_url": None, "openapi_url": None}
 
 app = FastAPI(title="Cordial Bar Pipeline", version="1.0.0", **_docs)
 
-# 이 서비스는 Next.js 서버에서 서버-to-서버로만 호출된다. 브라우저 직접 호출은 불필요하므로
-# 기본은 로컬 개발 origin만 허용하고, 쿠키/자격증명은 허용하지 않는다.
-_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if o.strip() and o.strip() != "*"]
+# 이 서비스는 Next.js 서버(Vercel)에서 서버-to-서버로만 호출되며 CORS 는 서버 간 호출에 적용되지 않는다.
+# 기본은 브라우저 origin 을 허용하지 않고(빈 목록), 필요할 때만 CORS_ORIGINS 로 명시한다. 자격증명은 허용하지 않는다.
+_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip() and o.strip() != "*"]
 
 app.add_middleware(
     CORSMiddleware,

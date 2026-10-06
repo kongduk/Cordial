@@ -44,17 +44,22 @@ export async function POST(req: NextRequest) {
     if (!name || name.length > 100) return NextResponse.json({ error: "name required" }, { status: 400 });
     const safeAbv = typeof abv === "number" && isFinite(abv) ? Math.min(100, Math.max(0, abv)) : 0;
 
-    const total = await prisma.userIngredient.count({ where: { userId } });
-    if (total >= MAX_USER_INGREDIENTS) {
-      const exists = await prisma.userIngredient.findUnique({ where: { userId_name: { userId, name } }, select: { userId: true } });
-      if (!exists) return NextResponse.json({ error: "저장 가능한 재료 수를 초과했습니다." }, { status: 400 });
-    }
-
-    await prisma.userIngredient.upsert({
-      where: { userId_name: { userId, name } },
-      create: { userId, name, abv: safeAbv },
-      update: { abv: safeAbv },
+    // 유저별 advisory lock 으로 count-then-upsert 를 직렬화 (동시 요청으로 상한 우회 방지)
+    const ok = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"mix-ingredients:" + userId}))`;
+      const total = await tx.userIngredient.count({ where: { userId } });
+      if (total >= MAX_USER_INGREDIENTS) {
+        const exists = await tx.userIngredient.findUnique({ where: { userId_name: { userId, name } }, select: { userId: true } });
+        if (!exists) return false;
+      }
+      await tx.userIngredient.upsert({
+        where: { userId_name: { userId, name } },
+        create: { userId, name, abv: safeAbv },
+        update: { abv: safeAbv },
+      });
+      return true;
     });
+    if (!ok) return NextResponse.json({ error: "저장 가능한 재료 수를 초과했습니다." }, { status: 400 });
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error("[mix-ingredients POST]", error);

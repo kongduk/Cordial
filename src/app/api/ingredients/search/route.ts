@@ -3,6 +3,16 @@ import { getUserId } from "@/server/auth/getUser";
 import { prisma } from "@/shared/lib/prisma";
 import { SYNONYMS } from "@/shared/lib/ingredientSynonyms";
 
+// 커스텀 칵테일에서만 쓰이는 재료(사용자 입력으로 생성됨)는 공개 검색에서 제외
+const NOT_CUSTOM_ONLY = {
+  NOT: {
+    AND: [
+      { cocktails: { some: {} } },
+      { cocktails: { none: { cocktail: { isCustom: false } } } },
+    ],
+  },
+};
+
 export async function GET(req: NextRequest) {
   const q = (req.nextUrl.searchParams.get("q")?.trim() ?? "").slice(0, 50);
 
@@ -13,6 +23,7 @@ export async function GET(req: NextRequest) {
 
     if (q.length < 1) {
       globalResults = await prisma.ingredient.findMany({
+        where: NOT_CUSTOM_ONLY,
         select: { id: true, name: true, nameEn: true, abv: true, category: true },
         orderBy: { name: "asc" },
         take: 30,
@@ -25,6 +36,7 @@ export async function GET(req: NextRequest) {
 
       globalResults = await prisma.ingredient.findMany({
         where: {
+          ...NOT_CUSTOM_ONLY,
           OR: [...terms].flatMap(term => [
             { name: { contains: term, mode: "insensitive" as const } },
             { nameEn: { contains: term, mode: "insensitive" as const } },

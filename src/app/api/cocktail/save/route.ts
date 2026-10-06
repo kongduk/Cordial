@@ -51,11 +51,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "올바른 제조법을 선택해 주세요." }, { status: 400 });
     }
 
-    const savedCount = await prisma.cocktail.count({ where: { createdBy: userId, isCustom: true } });
-    if (savedCount >= MAX_CUSTOM_COCKTAILS_PER_USER) {
-      return NextResponse.json({ error: "저장 가능한 레시피 수를 초과했습니다." }, { status: 400 });
-    }
-
     const seenNames = new Set<string>();
     const safeIngredients = body.ingredients.filter(
       (ing) => typeof ing === "object" && ing !== null &&
@@ -70,39 +65,56 @@ export async function POST(req: NextRequest) {
     const clamp01 = (v: number) => isFinite(Number(v)) ? Math.min(1, Math.max(0, Number(v))) : 0;
     const safeAbv = isFinite(Number(body.abv)) ? Math.min(100, Math.max(0, Number(body.abv))) : 0;
 
-    const ingredientRecords = await Promise.all(
-      safeIngredients.map((ing) =>
-        prisma.ingredient.upsert({
-          where: { name: ing.name.trim() },
-          create: { name: ing.name.trim(), abv: isFinite(Number(ing.abv)) ? Math.min(100, Math.max(0, Number(ing.abv))) : 0 },
-          update: {},
-        })
-      )
-    );
+    // 유저별 advisory lock 으로 count-then-insert 를 직렬화 (동시 요청으로 상한 우회 방지)
+    const cocktail = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"cocktail-save:" + userId}))`;
 
-    const cocktail = await prisma.cocktail.create({
-      data: {
-        name: body.name.trim(),
-        description: typeof body.description === "string" ? body.description.slice(0, 500) : "",
-        method: body.method,
-        category: "커스텀",
-        isCustom: true,
-        createdBy: userId,
-        abv: safeAbv,
-        sweetness: clamp01(body.taste.sweetness),
-        sourness: clamp01(body.taste.sourness),
-        bitterness: clamp01(body.taste.bitterness),
-        strength: clamp01(body.taste.strength),
-        freshness: clamp01(body.taste.freshness),
-        popularity: 0,
-        ingredients: {
-          create: safeIngredients.map((ing, i) => ({
-            ingredientId: ingredientRecords[i].id,
-            amount: `${ing.amount}ml`,
-          })),
+      const savedCount = await tx.cocktail.count({ where: { createdBy: userId, isCustom: true } });
+      if (savedCount >= MAX_CUSTOM_COCKTAILS_PER_USER) return null;
+
+      // 전역 Ingredient 는 이름(대소문자 무시)으로 매칭만 하고 abv 등은 절대 수정하지 않는다.
+      // 없는 이름만 새로 만들며, 커스텀 칵테일에서만 쓰이는 재료는 /api/ingredients/search 에서 제외된다.
+      const ingredientRecords: { id: string }[] = [];
+      for (const ing of safeIngredients) {
+        const name = ing.name.trim();
+        const existing = await tx.ingredient.findFirst({ where: { name: { equals: name, mode: "insensitive" } } });
+        ingredientRecords.push(
+          existing ??
+            (await tx.ingredient.upsert({
+              where: { name },
+              create: { name, abv: isFinite(Number(ing.abv)) ? Math.min(100, Math.max(0, Number(ing.abv))) : 0 },
+              update: {},
+            }))
+        );
+      }
+
+      return tx.cocktail.create({
+        data: {
+          name: body.name.trim(),
+          description: typeof body.description === "string" ? body.description.slice(0, 500) : "",
+          method: body.method,
+          category: "커스텀",
+          isCustom: true,
+          createdBy: userId,
+          abv: safeAbv,
+          sweetness: clamp01(body.taste.sweetness),
+          sourness: clamp01(body.taste.sourness),
+          bitterness: clamp01(body.taste.bitterness),
+          strength: clamp01(body.taste.strength),
+          freshness: clamp01(body.taste.freshness),
+          popularity: 0,
+          ingredients: {
+            create: safeIngredients.map((ing, i) => ({
+              ingredientId: ingredientRecords[i].id,
+              amount: `${ing.amount}ml`,
+            })),
+          },
         },
-      },
+      });
     });
+    if (!cocktail) {
+      return NextResponse.json({ error: "저장 가능한 레시피 수를 초과했습니다." }, { status: 400 });
+    }
 
     return NextResponse.json({ id: cocktail.id, name: cocktail.name });
   } catch (error) {
