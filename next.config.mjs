@@ -48,6 +48,9 @@ const nextConfig = {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
   images: {
+    // 앱은 next/image 를 쓰지 않으므로 /_next/image 최적화기를 비활성화한다 (이미지 최적화 API 관련 취약점/오픈 프록시 표면 제거).
+    // remotePatterns 는 unoptimized 일 때 효과가 없지만, 향후 next/image 도입 시 허용 호스트 목록으로 남겨둔다.
+    unoptimized: true,
     remotePatterns: imageHosts.map((hostname) => ({ protocol: "https", hostname })),
   },
 };
