@@ -6,7 +6,7 @@ import NaverProvider from "next-auth/providers/naver";
 import { PrismaAdapter } from "@next-auth/prisma-adapter";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/shared/lib/prisma";
-import { allowByKey } from "@/shared/lib/rateLimit";
+import { allowByKey, getClientIp } from "@/shared/lib/rateLimit";
 
 // 존재하지 않는 계정에도 bcrypt 비용을 동일하게 지불해 타이밍 차이로 계정 존재 여부를 알 수 없게 함
 let dummyHash: Promise<string> | null = null;
@@ -21,7 +21,6 @@ const handler = NextAuth({
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-      allowDangerousEmailAccountLinking: true,
     }),
     GitHubProvider({
       clientId: process.env.GITHUB_CLIENT_ID!,
@@ -30,7 +29,6 @@ const handler = NextAuth({
     NaverProvider({
       clientId: process.env.NAVER_CLIENT_ID!,
       clientSecret: process.env.NAVER_CLIENT_SECRET!,
-      allowDangerousEmailAccountLinking: true,
     }),
     CredentialsProvider({
       name: "Credentials",
@@ -38,15 +36,22 @@ const handler = NextAuth({
         email: { label: "Email", type: "text" },
         password: { label: "Password", type: "password" },
       },
-      async authorize(credentials) {
+      async authorize(credentials, req) {
         if (!credentials) return null;
         const { email: rawEmail, password } = credentials;
         if (typeof rawEmail !== "string" || typeof password !== "string") return null;
         const email = rawEmail.trim().toLowerCase();
         if (!email || email.length > 254 || !password || Buffer.byteLength(password) > 72) return null;
 
-        // 계정 단위 무차별 대입 방어 (15분당 10회)
-        if (!(await allowByKey("login", email))) return null;
+        // 계정 단위 + IP 단위 무차별 대입 방어 (계정 15분당 10회 / IP 15분당 30회, 키 접두사로 분리)
+        const rawHeaders = req?.headers ?? {};
+        const headerValue = (name: string): string | null => {
+          const v = (rawHeaders as Record<string, unknown>)[name];
+          return typeof v === "string" ? v : Array.isArray(v) && typeof v[0] === "string" ? v[0] : null;
+        };
+        const ip = getClientIp({ headers: { get: headerValue } });
+        if (!(await allowByKey("login-ip", `ip:${ip}`))) return null;
+        if (!(await allowByKey("login", `email:${email}`))) return null;
 
         const user = await prisma.user.findFirst({
           where: { email: { equals: email, mode: "insensitive" } },

@@ -28,8 +28,11 @@ const LIMITS = {
   "bars-recommend": { requests: 30, window: "1 d" },
   "bars-nearby": { requests: 60, window: "1 d" },
   "bars-geocode": { requests: 100, window: "1 d" },
+  "cocktail-save": { requests: 20, window: "1 h" },
+  "mix-ingredients": { requests: 60, window: "1 h" },
   register: { requests: 10, window: "1 h" },
   login: { requests: 10, window: "15 m" },
+  "login-ip": { requests: 30, window: "15 m" },
 } as const;
 
 type Endpoint = keyof typeof LIMITS;
@@ -56,9 +59,13 @@ export function isRateLimitExemptEmail(email: string | null | undefined): boolea
 }
 
 export function getClientIp(req: { headers: { get(name: string): string | null } }): string {
+  // Vercel 은 x-vercel-forwarded-for / x-real-ip / x-forwarded-for 를 실제 클라이언트 IP 로 덮어쓰므로
+  // 위조 불가한 x-vercel-forwarded-for 를 우선 사용하고, 로컬/기타 환경은 기존 헤더로 폴백한다.
+  const first = (v: string | null) => v?.split(",")[0]?.trim() || undefined;
   return (
-    req.headers.get("x-real-ip")?.trim() ??
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    first(req.headers.get("x-vercel-forwarded-for")) ??
+    first(req.headers.get("x-real-ip")) ??
+    first(req.headers.get("x-forwarded-for")) ??
     "unknown"
   );
 }

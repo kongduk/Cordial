@@ -67,6 +67,7 @@ model User {
 
 model RefreshToken {
   id        String   @id @default(cuid())
+  /// SHA-256(hex) of the raw refresh token; the raw value only lives in the client cookie
   token     String   @unique
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
