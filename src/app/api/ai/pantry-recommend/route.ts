@@ -3,6 +3,7 @@ import { pantryRecommend } from "@/server/ai/pantryRecommend";
 import { checkSameOrigin } from "@/shared/lib/internalAuth";
 import { getAuthUser } from "@/server/auth/getUser";
 import { checkRateLimit } from "@/shared/lib/rateLimit";
+import { readJsonBody } from "@/shared/lib/readJson";
 
 export async function POST(req: NextRequest) {
   const originError = checkSameOrigin(req);
@@ -13,7 +14,9 @@ export async function POST(req: NextRequest) {
   if (rateLimitError) return rateLimitError;
 
   try {
-    const { ingredients } = await req.json() as { ingredients: string[] };
+    const parsed = await readJsonBody(req);
+    if (!parsed.ok) return parsed.response;
+    const { ingredients } = parsed.data as { ingredients: string[] };
 
     if (!Array.isArray(ingredients)) {
       return NextResponse.json({ error: "ingredients 배열이 필요합니다." }, { status: 400 });

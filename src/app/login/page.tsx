@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { signIn, useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import axios from "axios";
 import Link from "next/link";
 import { CordialLogo } from "@/shared/ui/CordialLogo";
@@ -50,8 +50,25 @@ function makeButtons(dark: boolean): OAuthBtn[] {
   ];
 }
 
+const OAUTH_ERROR_MESSAGES: Record<string, string> = {
+  OAuthAccountNotLinked: "이미 다른 로그인 방식으로 가입된 이메일입니다. 처음 가입한 방식으로 로그인해 주세요.",
+};
+const OAUTH_ERROR_GENERIC = "소셜 로그인에 실패했습니다. 잠시 후 다시 시도해 주세요.";
+
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginContent />
+    </Suspense>
+  );
+}
+
+function LoginContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const errorParam = searchParams.get("error");
+  // credentials 실패는 NextAuth 에러 페이지로 오지 않으므로(redirect:false) 여기 오는 error 는 OAuth 계열
+  const oauthError = errorParam ? (OAUTH_ERROR_MESSAGES[errorParam] ?? OAUTH_ERROR_GENERIC) : null;
   const { status } = useSession();
 
   useEffect(() => {
@@ -60,7 +77,8 @@ export default function LoginPage() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [formError, setError] = useState<string | null>(null);
+  const error = formError ?? oauthError;
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState<OAuthProvider | null>(null);
 

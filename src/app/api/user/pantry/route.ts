@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserId } from "@/server/auth/getUser";
 import { prisma } from "@/shared/lib/prisma";
+import { checkSameOrigin } from "@/shared/lib/internalAuth";
+import { readJsonBody } from "@/shared/lib/readJson";
 
 export async function GET(req: NextRequest) {
   const userId = await getUserId(req);
@@ -19,11 +21,16 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
+  const originError = checkSameOrigin(req);
+  if (originError) return originError;
+
   const userId = await getUserId(req);
   if (!userId) return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
 
   try {
-    const body = await req.json() as { pantry: unknown };
+    const parsed = await readJsonBody(req);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.data as { pantry: unknown };
     if (!Array.isArray(body.pantry) || body.pantry.length > 200 || !body.pantry.every(i => typeof i === "string" && i.length <= 100)) {
       return NextResponse.json({ error: "pantry는 문자열 배열이어야 합니다." }, { status: 400 });
     }

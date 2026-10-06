@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUserId } from "@/server/auth/getUser";
+import { getAuthUser } from "@/server/auth/getUser";
+import { checkRateLimit } from "@/shared/lib/rateLimit";
 import { prisma } from "@/shared/lib/prisma";
+import { checkSameOrigin } from "@/shared/lib/internalAuth";
+import { readJsonBody } from "@/shared/lib/readJson";
+
+const MAX_CUSTOM_COCKTAILS_PER_USER = 200;
 
 interface SaveBody {
   name: string;
@@ -18,11 +23,19 @@ interface SaveBody {
 }
 
 export async function POST(req: NextRequest) {
-  const userId = (await getUserId(req)) ?? undefined;
+  const originError = checkSameOrigin(req);
+  if (originError) return originError;
+
+  const authUser = await getAuthUser(req);
+  const userId = authUser?.id;
   if (!userId) return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+  const rateLimitError = await checkRateLimit(req, "cocktail-save", authUser.email, userId);
+  if (rateLimitError) return rateLimitError;
 
   try {
-    const body = await req.json() as SaveBody;
+    const parsed = await readJsonBody(req);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.data as unknown as SaveBody;
 
     const validMethods = ["shaking", "stirring", "build", "blending", "neat", "floating"];
     if (typeof body !== "object" || body === null || typeof body.taste !== "object" || body.taste === null) {
@@ -38,23 +51,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "올바른 제조법을 선택해 주세요." }, { status: 400 });
     }
 
+    const savedCount = await prisma.cocktail.count({ where: { createdBy: userId, isCustom: true } });
+    if (savedCount >= MAX_CUSTOM_COCKTAILS_PER_USER) {
+      return NextResponse.json({ error: "저장 가능한 레시피 수를 초과했습니다." }, { status: 400 });
+    }
+
+    const seenNames = new Set<string>();
     const safeIngredients = body.ingredients.filter(
       (ing) => typeof ing === "object" && ing !== null &&
                typeof ing.name === "string" && ing.name.trim().length > 0 && ing.name.length <= 100 &&
-               isFinite(Number(ing.amount)) && Number(ing.amount) > 0 && Number(ing.amount) <= 10000
+               isFinite(Number(ing.amount)) && Number(ing.amount) > 0 && Number(ing.amount) <= 10000 &&
+               (seenNames.has(ing.name.trim()) ? false : (seenNames.add(ing.name.trim()), true))
     );
     if (safeIngredients.length === 0) {
       return NextResponse.json({ error: "유효한 재료가 없습니다." }, { status: 400 });
     }
 
-    const clamp01 = (v: number) => isFinite(v) ? Math.min(1, Math.max(0, v)) : 0;
-    const safeAbv = isFinite(body.abv) ? Math.min(100, Math.max(0, body.abv)) : 0;
+    const clamp01 = (v: number) => isFinite(Number(v)) ? Math.min(1, Math.max(0, Number(v))) : 0;
+    const safeAbv = isFinite(Number(body.abv)) ? Math.min(100, Math.max(0, Number(body.abv))) : 0;
 
     const ingredientRecords = await Promise.all(
       safeIngredients.map((ing) =>
         prisma.ingredient.upsert({
           where: { name: ing.name.trim() },
-          create: { name: ing.name.trim(), abv: isFinite(ing.abv) ? Math.min(100, Math.max(0, ing.abv)) : 0 },
+          create: { name: ing.name.trim(), abv: isFinite(Number(ing.abv)) ? Math.min(100, Math.max(0, Number(ing.abv))) : 0 },
           update: {},
         })
       )

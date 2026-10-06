@@ -30,10 +30,10 @@ async function fetchNearbyBarsPage(
   if (!key) throw new Error("GOOGLE_MAPS_API_KEY not configured");
 
   const url = pageToken
-    ? `https://maps.googleapis.com/maps/api/place/nearbysearch/json?pagetoken=${pageToken}&key=${key}`
+    ? `https://maps.googleapis.com/maps/api/place/nearbysearch/json?pagetoken=${encodeURIComponent(pageToken)}&key=${key}`
     : `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${NEARBY_RADIUS_M}&type=bar&language=ko&key=${key}`;
 
-  const res = await fetch(url);
+  const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
   if (!res.ok) {
     console.error(`[barsPipeline] Google Places API HTTP ${res.status}`);
     return { results: [] };
@@ -61,14 +61,17 @@ async function fetchAllNearbyBars(lat: number, lng: number): Promise<GooglePlace
 async function fetchPlaceReviews(placeId: string): Promise<string[]> {
   const key = process.env.GOOGLE_MAPS_API_KEY;
   if (!key) return [];
-  const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=reviews&language=ko&key=${key}`;
-  const res = await fetch(url);
+  const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(placeId)}&fields=reviews&language=ko&key=${key}`;
+  const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
   if (!res.ok) {
     console.error(`[barsPipeline] Google Places Details HTTP ${res.status} for place ${placeId}`);
     return [];
   }
   const data = (await res.json()) as { result?: { reviews?: { text: string }[] } };
-  return (data.result?.reviews ?? []).map((r) => r.text).filter(Boolean);
+  return (data.result?.reviews ?? []).map((r) => r.text)
+    .filter((t): t is string => typeof t === "string" && t.length > 0)
+    .slice(0, 5)
+    .map((t) => t.slice(0, 1000));
 }
 
 function isStale(analyzedAt: Date | null): boolean {
@@ -143,8 +146,26 @@ export async function runInlinePipeline(lat: number, lng: number): Promise<void>
   }
 }
 
+// 동일 지역 동시 요청 합치기 + 전체 동시 실행 수 제한 (유료 Google/Gemini 호출 증폭 방지).
+// 항목은 finally 에서 반드시 제거되므로 Map 은 MAX_INFLIGHT_PIPELINES 를 넘어 커지지 않는다.
+const MAX_INFLIGHT_PIPELINES = 3;
+const inflightPipelines = new Map<string, Promise<void>>();
+
 /** 필요 시 파이프라인 실행 (FastAPI 우선, 실패 시 인라인) */
 export async function ensureFreshBars(lat: number, lng: number): Promise<void> {
+  const key = `${lat.toFixed(2)},${lng.toFixed(2)}`;
+  const existing = inflightPipelines.get(key);
+  if (existing) return existing;
+  if (inflightPipelines.size >= MAX_INFLIGHT_PIPELINES) return; // 과부하 시 기존 DB 데이터로 응답
+
+  const p = ensureFreshBarsUncoalesced(lat, lng).finally(() => {
+    inflightPipelines.delete(key);
+  });
+  inflightPipelines.set(key, p);
+  return p;
+}
+
+async function ensureFreshBarsUncoalesced(lat: number, lng: number): Promise<void> {
   const freshCount = await countFreshNearbyBarsInDB(lat, lng);
   if (freshCount >= MIN_BARS_THRESHOLD) return;
 

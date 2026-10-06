@@ -17,8 +17,8 @@ export async function POST(req: NextRequest) {
     res.cookies.set("cordial_refresh", result.refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
+      sameSite: "strict",
+      path: "/api/auth", // refresh/logout 엔드포인트에만 전송
       maxAge: 60 * 60 * 24 * 30,
     });
     return res;

@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/shared/lib/prisma";
 import { checkSameOrigin } from "@/shared/lib/internalAuth";
 import { checkRateLimit, isRateLimitExemptEmail } from "@/shared/lib/rateLimit";
+import { readJsonBody } from "@/shared/lib/readJson";
 
 export async function POST(req: NextRequest) {
   const originError = checkSameOrigin(req);
@@ -11,7 +12,9 @@ export async function POST(req: NextRequest) {
   if (rateLimitError) return rateLimitError;
 
   try {
-    const body = await req.json() as { email?: unknown; password?: unknown; name?: unknown };
+    const parsed = await readJsonBody(req);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.data as { email?: unknown; password?: unknown; name?: unknown };
     const { password, name } = body;
     const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : body.email;
 

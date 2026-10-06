@@ -5,6 +5,7 @@ import type { EmotionVector } from "@/shared/types";
 import { checkSameOrigin } from "@/shared/lib/internalAuth";
 import { getAuthUser } from "@/server/auth/getUser";
 import { checkRateLimit } from "@/shared/lib/rateLimit";
+import { readJsonBody } from "@/shared/lib/readJson";
 
 function isValidEmotionVector(v: unknown): v is EmotionVector {
   if (typeof v !== "object" || v === null) return false;
@@ -26,7 +27,9 @@ export async function POST(req: NextRequest) {
   if (rateLimitError) return rateLimitError;
 
   try {
-    const body = await req.json() as { emotionVector: unknown; drinkingCapacity?: string };
+    const parsed = await readJsonBody(req);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.data as { emotionVector: unknown; drinkingCapacity?: string };
     const { emotionVector, drinkingCapacity: capacityFromBody } = body;
 
     if (!isValidEmotionVector(emotionVector)) {

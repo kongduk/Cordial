@@ -62,7 +62,7 @@ async def get_place_reviews(place_id: str) -> list[str]:
 
 
 def get_photo_url(photo_reference: str, max_width: int = 600) -> str:
-    """Google Maps 사진 URL 생성"""
+    """Google Maps 사진 URL 생성 (API key 포함 — 서버 내부 용도로만 사용, 저장/응답 금지)"""
     return (
         f"https://maps.googleapis.com/maps/api/place/photo"
         f"?maxwidth={max_width}&photo_reference={photo_reference}&key={GOOGLE_MAPS_API_KEY}"
@@ -71,9 +71,9 @@ def get_photo_url(photo_reference: str, max_width: int = 600) -> str:
 
 def extract_bar_base(place: dict) -> dict:
     """Google Places 결과에서 기본 바 정보 추출"""
-    photos = place.get("photos", [])
-    photo_ref = photos[0].get("photo_reference", "") if photos else ""
-    image_url = get_photo_url(photo_ref) if photo_ref else None
+    # 주의: Google 사진 URL 에는 API key 가 쿼리로 포함되어 DB/응답에 저장되면 키가 유출된다.
+    # 키 없는 URL 을 저장할 수 없으므로 imageUrl 은 저장하지 않는다 (필요 시 서버 프록시로 제공).
+    image_url = None
 
     address = place.get("vicinity") or place.get("formatted_address", "")
     area_parts = address.split(" ")

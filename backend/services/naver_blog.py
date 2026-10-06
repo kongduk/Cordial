@@ -49,6 +49,7 @@ def _parse_blog_content(html: str) -> str:
     return soup.get_text(" ", strip=True)[:1500]
 
 
+_MAX_BLOG_BYTES = 500_000
 _ALLOWED_BLOG_HOSTS = {"blog.naver.com", "m.blog.naver.com"}
 
 
@@ -72,10 +73,26 @@ async def _fetch_blog_content(url: str, client: httpx.AsyncClient) -> str:
             url,
         )
         target = mobile_url if "m.blog.naver.com" in mobile_url else url
-        res = await client.get(target, headers=_HEADERS, timeout=8, follow_redirects=True)
-        if res.status_code != 200 or not _is_allowed_blog_url(str(res.url)):
-            return ""
-        return _parse_blog_content(res.text[:500_000])
+        # 리다이렉트는 수동으로 따라가며 매 hop 마다 호스트를 검증 (SSRF 방지), 본문은 상한까지만 읽음
+        current = target
+        for _ in range(3):
+            if not _is_allowed_blog_url(current):
+                return ""
+            async with client.stream("GET", current, headers=_HEADERS, timeout=8, follow_redirects=False) as res:
+                if res.status_code in (301, 302, 303, 307, 308):
+                    location = res.headers.get("location", "")
+                    current = str(httpx.URL(current).join(location)) if location else ""
+                    continue
+                if res.status_code != 200:
+                    return ""
+                raw = bytearray()
+                async for chunk in res.aiter_bytes():
+                    raw.extend(chunk)
+                    if len(raw) >= _MAX_BLOG_BYTES:
+                        break
+                html = bytes(raw[:_MAX_BLOG_BYTES]).decode(res.encoding or "utf-8", errors="ignore")
+                return _parse_blog_content(html)
+        return ""
     except Exception:
         return ""
 

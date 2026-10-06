@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/server/auth/getUser";
 import { checkSameOrigin } from "@/shared/lib/internalAuth";
 import { checkRateLimit } from "@/shared/lib/rateLimit";
+import { sanitizeImageUrl } from "@/shared/lib/safeUrl";
 import { prisma } from "@/shared/lib/prisma";
 import { NEARBY_RADIUS_M, ensureFreshBars } from "@/server/barsPipeline";
 import type { BarSurvey, RecommendedBar, BarMood, BarPurpose, CocktailStyle, BarBudget } from "@/shared/types";
+import { readJsonBody } from "@/shared/lib/readJson";
 
 const BUDGET_TO_PRICE: Record<string, number[]> = {
   "3만원 이하": [1, 2],
@@ -151,6 +153,9 @@ function scoreBar(
   return { score, matchReasons };
 }
 
+// 후보 바 상한 (메모리/CPU 보호)
+const MAX_CANDIDATE_BARS = 500;
+
 export async function POST(req: NextRequest) {
   const originError = checkSameOrigin(req);
   if (originError) return originError;
@@ -160,7 +165,9 @@ export async function POST(req: NextRequest) {
   if (rateLimitError) return rateLimitError;
 
   try {
-    const body = await req.json() as { lat: unknown; lng: unknown; survey: unknown };
+    const parsed = await readJsonBody(req);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.data as { lat: unknown; lng: unknown; survey: unknown };
     const lat = Number(body.lat);
     const lng = Number(body.lng);
     const survey = body.survey as BarSurvey;
@@ -219,6 +226,7 @@ export async function POST(req: NextRequest) {
         latitude: { gte: lat - delta, lte: lat + delta },
         longitude: { gte: lng - lngDelta, lte: lng + lngDelta },
       },
+      take: MAX_CANDIDATE_BARS,
     });
 
     // 바가 5개 미만이면 10km로 확장 (지방 도시·바 밀도 낮은 지역 대응)
@@ -230,6 +238,7 @@ export async function POST(req: NextRequest) {
           latitude: { gte: lat - fallbackDelta, lte: lat + fallbackDelta },
           longitude: { gte: lng - fallbackLngDelta, lte: lng + fallbackLngDelta },
         },
+        take: MAX_CANDIDATE_BARS,
       });
     }
 
@@ -249,7 +258,7 @@ export async function POST(req: NextRequest) {
           purposeTags: bar.purposeTags,
           cocktailStyles: bar.cocktailStyles,
           signature: bar.signature,
-          imageUrl: bar.imageUrl,
+          imageUrl: sanitizeImageUrl(bar.imageUrl),
           description: bar.description,
           latitude: bar.latitude,
           longitude: bar.longitude,

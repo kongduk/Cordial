@@ -24,6 +24,67 @@ app.add_middleware(
     allow_headers=["Content-Type", "X-Internal-Secret"],
 )
 
+_MAX_BODY_BYTES = 16 * 1024  # 이 서비스의 요청 body 는 작은 JSON 뿐
+
+
+class BodySizeLimitMiddleware:
+    """pure ASGI body 상한 — Content-Length 와 chunked 스트림 누적 바이트 모두 검사"""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        for name, value in scope["headers"]:
+            if name == b"content-length":
+                try:
+                    too_big = int(value) > _MAX_BODY_BYTES
+                except ValueError:
+                    too_big = True
+                if too_big:
+                    return await self._reject(send)
+
+        received = 0
+
+        async def limited_receive():
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > _MAX_BODY_BYTES:
+                    raise _BodyTooLarge()
+            return message
+
+        started = False
+
+        async def tracking_send(message):
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, limited_receive, tracking_send)
+        except _BodyTooLarge:
+            if not started:
+                await self._reject(send)
+
+    @staticmethod
+    async def _reject(send):
+        body = b'{"detail":"Payload too large"}'
+        await send({"type": "http.response.start", "status": 413,
+                    "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
+        await send({"type": "http.response.body", "body": body})
+
+
+class _BodyTooLarge(Exception):
+    pass
+
+
+app.add_middleware(BodySizeLimitMiddleware)
+
 app.include_router(bars.router)
 
 

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { sanitizeImageUrl } from "@/shared/lib/safeUrl";
 import { prisma } from "@/shared/lib/prisma";
 import { getAuthUser } from "@/server/auth/getUser";
 import { checkSameOrigin } from "@/shared/lib/internalAuth";
@@ -8,6 +9,7 @@ import {
   countFreshNearbyBarsInDB,
   ensureFreshBars,
 } from "@/server/barsPipeline";
+import { readJsonBody } from "@/shared/lib/readJson";
 
 export async function POST(req: NextRequest) {
   const originError = checkSameOrigin(req);
@@ -22,7 +24,9 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const body = (await req.json()) as { lat: unknown; lng: unknown };
+    const parsed = await readJsonBody(req);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.data as { lat: unknown; lng: unknown };
     const lat = Number(body.lat);
     const lng = Number(body.lng);
     if (!isFinite(lat) || !isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
@@ -64,7 +68,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    return NextResponse.json(bars);
+    return NextResponse.json(bars.map((b) => ({ ...b, imageUrl: sanitizeImageUrl(b.imageUrl) })));
   } catch (error) {
     console.error("[bars/nearby POST]", error);
     return NextResponse.json({ error: "주변 바를 불러올 수 없습니다." }, { status: 500 });

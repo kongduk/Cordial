@@ -1,4 +1,4 @@
-import { genAI } from "@/shared/lib/geminiClient";
+import { generateJsonText, clampText, clamp01 } from "@/shared/lib/geminiClient";
 import type { EmotionVector } from "@/shared/types";
 
 const SYSTEM_PROMPT = `사용자의 텍스트를 분석하여 현재 감정 상태를 5가지 차원으로 수치화하세요.
@@ -11,15 +11,6 @@ const SYSTEM_PROMPT = `사용자의 텍스트를 분석하여 현재 감정 상�
   "fatigue": 0.0~1.0,
   "excitement": 0.0~1.0
 }`;
-
-function isValidEmotion(parsed: unknown): parsed is EmotionVector {
-  if (typeof parsed !== "object" || parsed === null) return false;
-  const keys: (keyof EmotionVector)[] = ["joy", "sadness", "stress", "fatigue", "excitement"];
-  return keys.every(k => {
-    const v = (parsed as Record<string, unknown>)[k];
-    return typeof v === "number" && isFinite(v) && v >= 0 && v <= 1;
-  });
-}
 
 function inferEmotionFromText(text: string): EmotionVector {
   const t = text.toLowerCase();
@@ -43,16 +34,23 @@ function inferEmotionFromText(text: string): EmotionVector {
   return { joy, sadness, stress, fatigue, excitement };
 }
 
-export async function analyzeEmotion(text: string): Promise<EmotionVector> {
+export async function analyzeEmotion(rawText: string): Promise<EmotionVector> {
+  const text = clampText(rawText, 1000);
   try {
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash",
-      systemInstruction: SYSTEM_PROMPT,
-      generationConfig: { responseMimeType: "application/json" },
-    });
-    const result = await model.generateContent(text);
-    const parsed = JSON.parse(result.response.text()) as unknown;
-    return isValidEmotion(parsed) ? parsed : inferEmotionFromText(text);
+    const raw = await generateJsonText(text, SYSTEM_PROMPT);
+    const parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed === "object" && parsed !== null) {
+      const p = parsed as Record<string, unknown>;
+      const joy = clamp01(p.joy);
+      const sadness = clamp01(p.sadness);
+      const stress = clamp01(p.stress);
+      const fatigue = clamp01(p.fatigue);
+      const excitement = clamp01(p.excitement);
+      if (joy !== null && sadness !== null && stress !== null && fatigue !== null && excitement !== null) {
+        return { joy, sadness, stress, fatigue, excitement };
+      }
+    }
+    return inferEmotionFromText(text);
   } catch {
     return inferEmotionFromText(text);
   }
