@@ -51,7 +51,7 @@ export default function LandingPage() {
                 fontFamily: W.sans,
               }}>레시피 둘러보기</Link>
             </div>
-            <div style={{ marginTop: 32, fontFamily: W.mono, fontSize: 11, color: W.textFaint, letterSpacing: 0.4 }}>2,400+ COCKTAILS · 320 BARS · KOREA</div>
+            <div style={{ marginTop: 32, fontFamily: W.mono, fontSize: 11, color: W.textFaint, letterSpacing: 0.4 }}>IBA 공식 레시피 · AI 감정 분석 · 바 매칭</div>
           </div>
           <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 24, height: 480 }}>
             <div style={{ paddingBottom: 60 }}>

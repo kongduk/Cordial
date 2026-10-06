@@ -173,9 +173,9 @@ export default function SignupPage() {
             <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 9 }}>
               <input type="text" placeholder="이름 (선택)" value={name} onChange={e => setName(e.target.value)}
                 style={{ height: 44, borderRadius: 10, border: `0.5px solid ${W.borderStrong}`, background: W.surface, color: W.text, fontSize: 13, fontFamily: W.sans, padding: "0 14px", outline: "none", width: "100%", boxSizing: "border-box" }} />
-              <input type="email" placeholder="이메일" value={email} onChange={e => setEmail(e.target.value)} required
+              <input type="email" autoComplete="email" placeholder="이메일" value={email} onChange={e => setEmail(e.target.value)} required
                 style={{ height: 44, borderRadius: 10, border: `0.5px solid ${W.borderStrong}`, background: W.surface, color: W.text, fontSize: 13, fontFamily: W.sans, padding: "0 14px", outline: "none", width: "100%", boxSizing: "border-box" }} />
-              <input type="password" autoComplete="new-password" placeholder="비밀번호 (8자 이상)" value={password} onChange={e => setPassword(e.target.value)} required
+              <input type="password" autoComplete="new-password" minLength={8} placeholder="비밀번호 (8자 이상)" value={password} onChange={e => setPassword(e.target.value)} required
                 style={{ height: 44, borderRadius: 10, border: `0.5px solid ${W.borderStrong}`, background: W.surface, color: W.text, fontSize: 13, fontFamily: W.sans, padding: "0 14px", outline: "none", width: "100%", boxSizing: "border-box" }} />
               {error && <p style={{ fontSize: 12, color: "#D32F2F", margin: 0 }}>{error}</p>}
               <button type="submit" disabled={loading}
@@ -230,9 +230,9 @@ export default function SignupPage() {
             <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <input type="text" placeholder="이름 (선택)" value={name} onChange={e => setName(e.target.value)}
                 style={{ height: 48, borderRadius: 12, border: `0.5px solid ${T.darkBorderStrong}`, background: T.darkSurface, color: T.darkText, fontSize: 14, fontFamily: T.sans, padding: "0 16px", outline: "none", width: "100%", boxSizing: "border-box", letterSpacing: -0.1 }} />
-              <input type="email" placeholder="이메일" value={email} onChange={e => setEmail(e.target.value)} required
+              <input type="email" autoComplete="email" placeholder="이메일" value={email} onChange={e => setEmail(e.target.value)} required
                 style={{ height: 48, borderRadius: 12, border: `0.5px solid ${T.darkBorderStrong}`, background: T.darkSurface, color: T.darkText, fontSize: 14, fontFamily: T.sans, padding: "0 16px", outline: "none", width: "100%", boxSizing: "border-box", letterSpacing: -0.1 }} />
-              <input type="password" autoComplete="new-password" placeholder="비밀번호 (8자 이상)" value={password} onChange={e => setPassword(e.target.value)} required
+              <input type="password" autoComplete="new-password" minLength={8} placeholder="비밀번호 (8자 이상)" value={password} onChange={e => setPassword(e.target.value)} required
                 style={{ height: 48, borderRadius: 12, border: `0.5px solid ${T.darkBorderStrong}`, background: T.darkSurface, color: T.darkText, fontSize: 14, fontFamily: T.sans, padding: "0 16px", outline: "none", width: "100%", boxSizing: "border-box", letterSpacing: -0.1 }} />
               {error && <p style={{ fontSize: 13, color: "#EF9A9A", margin: 0, letterSpacing: -0.1 }}>{error}</p>}
               <button type="submit" disabled={loading}
