@@ -4,6 +4,7 @@ import type { MixIngredient, MixMethod } from "@/shared/types";
 import { checkSameOrigin } from "@/shared/lib/internalAuth";
 import { getAuthUser } from "@/server/auth/getUser";
 import { checkRateLimit } from "@/shared/lib/rateLimit";
+import { readJsonBody } from "@/shared/lib/readJson";
 
 export async function POST(req: NextRequest) {
   const originError = checkSameOrigin(req);
@@ -14,7 +15,9 @@ export async function POST(req: NextRequest) {
   if (rateLimitError) return rateLimitError;
 
   try {
-    const { ingredients, method, notes } = await req.json() as {
+    const parsed = await readJsonBody(req);
+    if (!parsed.ok) return parsed.response;
+    const { ingredients, method, notes } = parsed.data as {
       ingredients: MixIngredient[];
       method: MixMethod;
       notes?: string;

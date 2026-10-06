@@ -11,6 +11,7 @@ export async function GET(req: NextRequest) {
         ? { OR: [{ isCustom: false }, { createdBy: userId }] }
         : { isCustom: false },
       orderBy: [{ isCustom: "asc" }, { popularity: "desc" }],
+      take: 500,
       select: {
         id: true,
         name: true,

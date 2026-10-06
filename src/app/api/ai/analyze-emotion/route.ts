@@ -4,6 +4,7 @@ import { prisma } from "@/shared/lib/prisma";
 import { checkSameOrigin } from "@/shared/lib/internalAuth";
 import { getAuthUser } from "@/server/auth/getUser";
 import { checkRateLimit } from "@/shared/lib/rateLimit";
+import { readJsonBody } from "@/shared/lib/readJson";
 
 export async function POST(req: NextRequest) {
   const originError = checkSameOrigin(req);
@@ -14,7 +15,9 @@ export async function POST(req: NextRequest) {
   if (rateLimitError) return rateLimitError;
 
   try {
-    const { text } = await req.json() as { text: string };
+    const parsed = await readJsonBody(req);
+    if (!parsed.ok) return parsed.response;
+    const { text } = parsed.data as { text: string };
 
     if (typeof text !== "string" || text.trim().length < 5) {
       return NextResponse.json({ error: "최소 5자 이상 입력해 주세요." }, { status: 400 });

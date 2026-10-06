@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { sanitizeImageUrl } from "@/shared/lib/safeUrl";
 import { prisma } from "@/shared/lib/prisma";
 
 export async function GET(req: NextRequest) {
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest) {
       take: 20,
     });
 
-    return NextResponse.json(bars);
+    return NextResponse.json(bars.map((b) => ({ ...b, imageUrl: sanitizeImageUrl(b.imageUrl) })));
   } catch (error) {
     console.error("[bars GET]", error);
     return NextResponse.json({ error: "바 목록을 불러올 수 없습니다." }, { status: 500 });

@@ -10,6 +10,7 @@ export async function GET(req: NextRequest) {
     const cocktails = await prisma.cocktail.findMany({
       where: { createdBy: userId, isCustom: true },
       orderBy: { id: "desc" },
+      take: 200,
       select: {
         id: true,
         name: true,

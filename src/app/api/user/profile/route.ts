@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserId } from "@/server/auth/getUser";
 import { prisma } from "@/shared/lib/prisma";
 import type { DrinkingCapacity } from "@/shared/types";
+import { checkSameOrigin } from "@/shared/lib/internalAuth";
+import { readJsonBody } from "@/shared/lib/readJson";
 
 export async function GET(req: NextRequest) {
   const userId = await getUserId(req);
@@ -34,11 +36,16 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
+  const originError = checkSameOrigin(req);
+  if (originError) return originError;
+
   const userId = await getUserId(req);
   if (!userId) return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
 
   try {
-    const body = await req.json() as {
+    const parsed = await readJsonBody(req);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.data as {
       drinkingCapacity?: DrinkingCapacity;
       sweetPref?: number;
       sourPref?: number;

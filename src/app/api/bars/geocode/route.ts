@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
     const key = process.env.GOOGLE_MAPS_API_KEY;
     if (!key) return NextResponse.json({ error: "Google Maps API 키가 설정되지 않았습니다." }, { status: 503 });
     const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(area)}&language=ko&key=${key}`;
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(8_000) });
     if (!res.ok) {
       return NextResponse.json({ error: "위치 검색 API 오류" }, { status: 502 });
     }
