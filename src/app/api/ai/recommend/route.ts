@@ -18,6 +18,8 @@ function isValidEmotionVector(v: unknown): v is EmotionVector {
   );
 }
 
+export const maxDuration = 60;
+
 export async function POST(req: NextRequest) {
   const originError = checkSameOrigin(req);
   if (originError) return originError;

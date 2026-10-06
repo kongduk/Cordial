@@ -68,7 +68,7 @@ async function generateDescriptions(names: string[], emotion: EmotionVector): Pr
     ].filter(Boolean).join(", ") || "평온함";
 
     const prompt = `고객 감정: ${emotionSummary} (세부: ${JSON.stringify(emotion)})\n\n추천 칵테일 목록 (${names.length}개):\n${names.map((n, i) => `${i + 1}. ${n}`).join("\n")}\n\n위 ${names.length}개 칵테일 각각에 대해 2~3문장 추천 설명을 JSON 배열로 반환하세요.`;
-    const raw = await generateJsonText(prompt, DESCRIPTION_PROMPT);
+    const raw = await generateJsonText(prompt, DESCRIPTION_PROMPT, { maxOutputTokens: 2048 });
     const parsed = parseGeminiJson<unknown>(raw);
 
     if (Array.isArray(parsed)) {

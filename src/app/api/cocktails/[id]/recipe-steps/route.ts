@@ -4,6 +4,8 @@ import { checkRateLimit, consumeAiBudget } from "@/shared/lib/rateLimit";
 import { prisma } from "@/shared/lib/prisma";
 import { generateRecipeSteps } from "@/server/ai/generateRecipeSteps";
 
+export const maxDuration = 60;
+
 export async function GET(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }

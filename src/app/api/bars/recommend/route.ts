@@ -156,6 +156,8 @@ function scoreBar(
 // 후보 바 상한 (메모리/CPU 보호)
 const MAX_CANDIDATE_BARS = 500;
 
+export const maxDuration = 60;
+
 export async function POST(req: NextRequest) {
   const originError = checkSameOrigin(req);
   if (originError) return originError;

@@ -37,7 +37,7 @@ function inferEmotionFromText(text: string): EmotionVector {
 export async function analyzeEmotion(rawText: string): Promise<EmotionVector> {
   const text = clampText(rawText, 1000);
   try {
-    const raw = await generateJsonText(text, SYSTEM_PROMPT);
+    const raw = await generateJsonText(text, SYSTEM_PROMPT, { maxOutputTokens: 256 });
     const parsed = JSON.parse(raw) as unknown;
     if (typeof parsed === "object" && parsed !== null) {
       const p = parsed as Record<string, unknown>;

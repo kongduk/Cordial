@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 
 const apiKey = process.env.GEMINI_API_KEY;
 if (!apiKey) throw new Error("GEMINI_API_KEY 환경변수가 설정되지 않았습니다.");
@@ -36,13 +36,21 @@ export function clamp01(value: unknown): number | null {
 }
 
 /** JSON 응답 모드로 Gemini를 호출하고 원문 텍스트를 반환 (파싱은 호출자가 폴백과 함께 처리) */
-export async function generateJsonText(prompt: string, systemInstruction?: string): Promise<string> {
+export interface GenerateJsonOptions {
+  /** 작업별 출력 토큰 상한 (기본 4096) */
+  maxOutputTokens?: number;
+  /** thinking 깊이 (기본 LOW — 이 모델은 MINIMAL 미지원, 단순 JSON 생성에 추론은 지연만 늘림) */
+  thinkingLevel?: ThinkingLevel;
+}
+
+export async function generateJsonText(prompt: string, systemInstruction?: string, options: GenerateJsonOptions = {}): Promise<string> {
   const response = await genAI.models.generateContent({
     model: GEMINI_MODEL,
     contents: prompt,
     config: {
       responseMimeType: "application/json",
-      maxOutputTokens: MAX_OUTPUT_TOKENS,
+      maxOutputTokens: options.maxOutputTokens ?? MAX_OUTPUT_TOKENS,
+      thinkingConfig: { thinkingLevel: options.thinkingLevel ?? ThinkingLevel.LOW },
       abortSignal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       ...(systemInstruction ? { systemInstruction } : {}),
     },
