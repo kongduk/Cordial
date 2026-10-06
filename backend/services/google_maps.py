@@ -6,6 +6,22 @@ GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")
 NEARBY_RADIUS_M = 2000
 
 
+class GoogleMapsError(Exception):
+    """Google Maps 호출 실패. 메시지에 요청 URL(쿼리의 API key 포함)을 담지 않는다."""
+
+
+async def _get_json(url: str, params: dict) -> dict:
+    # httpx 예외 메시지/트레이스백에는 key 가 포함된 전체 URL 이 찍히므로 상태 코드만 남긴 예외로 바꾼다
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.get(url, params=params, timeout=10)
+    except httpx.HTTPError as e:
+        raise GoogleMapsError(f"Google Maps 요청 실패 ({type(e).__name__})") from None
+    if not res.is_success:
+        raise GoogleMapsError(f"Google Maps HTTP {res.status_code}")
+    return res.json()
+
+
 async def search_nearby_bars(lat: float, lng: float, radius: int = NEARBY_RADIUS_M) -> list[dict]:
     """Google Maps Places Nearby Search — 주변 칵테일 바 검색"""
     url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
@@ -16,10 +32,7 @@ async def search_nearby_bars(lat: float, lng: float, radius: int = NEARBY_RADIUS
         "language": "ko",
         "key": GOOGLE_MAPS_API_KEY,
     }
-    async with httpx.AsyncClient() as client:
-        res = await client.get(url, params=params, timeout=10)
-        res.raise_for_status()
-        return res.json().get("results", [])
+    return (await _get_json(url, params)).get("results", [])
 
 
 async def search_bars_by_text(query: str, count: int = 20) -> list[dict]:
@@ -31,11 +44,7 @@ async def search_bars_by_text(query: str, count: int = 20) -> list[dict]:
         "language": "ko",
         "key": GOOGLE_MAPS_API_KEY,
     }
-    async with httpx.AsyncClient() as client:
-        res = await client.get(url, params=params, timeout=10)
-        res.raise_for_status()
-        results = res.json().get("results", [])
-        return results[:count]
+    return (await _get_json(url, params)).get("results", [])[:count]
 
 
 async def get_place_details(place_id: str) -> dict:
@@ -47,11 +56,10 @@ async def get_place_details(place_id: str) -> dict:
         "language": "ko",
         "key": GOOGLE_MAPS_API_KEY,
     }
-    async with httpx.AsyncClient() as client:
-        res = await client.get(url, params=params, timeout=10)
-        if not res.is_success:
-            return {}
-        return res.json().get("result", {})
+    try:
+        return (await _get_json(url, params)).get("result", {})
+    except GoogleMapsError:
+        return {}
 
 
 async def get_place_reviews(place_id: str) -> list[str]:
