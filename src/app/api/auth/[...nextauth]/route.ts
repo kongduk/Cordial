@@ -7,7 +7,7 @@ import NaverProvider from "next-auth/providers/naver";
 import { PrismaAdapter } from "@next-auth/prisma-adapter";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/shared/lib/prisma";
-import { allowByKey, getClientIp } from "@/shared/lib/rateLimit";
+import { allowByKey, getClientIpKey } from "@/shared/lib/rateLimit";
 
 // 존재하지 않는 계정에도 bcrypt 비용을 동일하게 지불해 타이밍 차이로 계정 존재 여부를 알 수 없게 함
 let dummyHash: Promise<string> | null = null;
@@ -50,9 +50,9 @@ const handler = NextAuth({
           const v = (rawHeaders as Record<string, unknown>)[name];
           return typeof v === "string" ? v : Array.isArray(v) && typeof v[0] === "string" ? v[0] : null;
         };
-        const ip = getClientIp({ headers: { get: headerValue } });
+        const ip = getClientIpKey({ headers: { get: headerValue } });
         if (!(await allowByKey("login-ip", `ip:${ip}`))) return null;
-        if (!(await allowByKey("login", `email:${email}`))) return null;
+        if (!(await allowByKey("login", `email:${email}|net:${ip}`))) return null;
 
         const user = await prisma.user.findFirst({
           where: { email: { equals: email, mode: "insensitive" } },

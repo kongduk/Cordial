@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserId } from "@/server/auth/getUser";
 import { prisma } from "@/shared/lib/prisma";
-import { checkPublicRead, PUBLIC_CACHE_CONTROL } from "@/shared/lib/rateLimit";
+import { checkPublicRead } from "@/shared/lib/rateLimit";
 
 export async function GET(req: NextRequest) {
   try {
@@ -37,7 +37,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(cocktails, {
       headers: userId
         ? { "Cache-Control": "private, no-store" }
-        : { "Cache-Control": PUBLIC_CACHE_CONTROL, Vary: "Cookie, Authorization" },
+        // 로그인 시 커스텀 칵테일이 포함되므로 CDN 공유 캐시 금지 (브라우저 캐시만)
+        : { "Cache-Control": "private, max-age=60", Vary: "Cookie, Authorization" },
     });
   } catch (error) {
     console.error("[cocktails list]", error);
