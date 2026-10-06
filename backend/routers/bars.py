@@ -2,7 +2,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query
 from security import require_internal_secret
 from pydantic import BaseModel, Field
-from services.google_maps import search_nearby_bars, search_bars_by_text, get_place_reviews, extract_bar_base
+from services.google_maps import search_nearby_bars, search_bars_by_text, get_place_reviews, extract_bar_base, GoogleMapsError
 from services.gemini import analyze_bar
 from services.database import upsert_bar, get_bars
 from services.naver_blog import search_naver_blog_reviews
@@ -72,7 +72,11 @@ async def process_place(place: dict) -> dict | None:
 async def pipeline_nearby(req: NearbyRequest):
     """위도/경도 기반 주변 칵테일 바 수집 → Gemini 분석 → DB 저장"""
     async with _pipeline_sem:
-        places = await search_nearby_bars(req.lat, req.lng, req.radius)
+        try:
+            places = await search_nearby_bars(req.lat, req.lng, req.radius)
+        except GoogleMapsError as e:
+            print(f"[pipeline_nearby] {e}")
+            raise HTTPException(status_code=502, detail="외부 지도 서비스 오류") from None
         if not places:
             raise HTTPException(status_code=404, detail="주변에 바를 찾을 수 없습니다.")
 
@@ -93,7 +97,11 @@ async def pipeline_search(req: TextSearchRequest):
     예: { "query": "해운대 칵테일바", "count": 20 }
     """
     async with _pipeline_sem:
-        places = await search_bars_by_text(req.query, req.count)
+        try:
+            places = await search_bars_by_text(req.query, req.count)
+        except GoogleMapsError as e:
+            print(f"[pipeline_search] {e}")
+            raise HTTPException(status_code=502, detail="외부 지도 서비스 오류") from None
         if not places:
             raise HTTPException(status_code=404, detail="검색 결과가 없습니다.")
 
