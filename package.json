@@ -30,8 +30,7 @@
   },
   "homepage": "https://github.com/kongduk/Cordial#readme",
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.89.0",
-    "@google/generative-ai": "^0.24.1",
+    "@google/genai": "^2.27.0",
     "@next-auth/prisma-adapter": "^1.0.7",
     "@prisma/adapter-pg": "^7.7.0",
     "@prisma/client": "^7.7.0",

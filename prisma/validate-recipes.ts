@@ -6,10 +6,11 @@
 
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 
 const prisma = new PrismaClient();
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY ?? "");
+const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY ?? "" });
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 
 const VALIDATE_PROMPT = `당신은 IBA 공인 바텐더입니다. 칵테일 레시피의 정확성을 검증하세요.
 
@@ -46,12 +47,6 @@ async function validateCocktail(cocktail: {
   abv: number;
   ingredients: { ingredient: { name: string }; amount: string | null }[];
 }): Promise<ValidationResult> {
-  const model = genAI.getGenerativeModel({
-    model: "gemini-2.5-flash",
-    systemInstruction: VALIDATE_PROMPT,
-    generationConfig: { responseMimeType: "application/json" },
-  });
-
   const ingList = cocktail.ingredients
     .map(ci => `${ci.ingredient.name} ${ci.amount ?? ""}`)
     .join(", ");
@@ -65,8 +60,12 @@ ABV: ${cocktail.abv}%
 이 레시피를 검증해주세요.`;
 
   try {
-    const result = await model.generateContent(prompt);
-    const text = result.response.text().trim();
+    const result = await genAI.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: prompt,
+      config: { responseMimeType: "application/json", systemInstruction: VALIDATE_PROMPT },
+    });
+    const text = (result.text ?? "").trim();
     const clean = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
     const parsed = JSON.parse(clean) as Record<string, unknown>;
 

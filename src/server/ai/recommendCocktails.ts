@@ -1,4 +1,4 @@
-import { genAI, parseGeminiJson } from "@/shared/lib/geminiClient";
+import { generateJsonText, parseGeminiJson, sanitizeLlmText } from "@/shared/lib/geminiClient";
 import { prisma } from "@/shared/lib/prisma";
 import type { EmotionVector, CocktailVector, RecommendedCocktail } from "@/shared/types";
 
@@ -60,11 +60,6 @@ function fallbackDesc(name: string): string {
 
 async function generateDescriptions(names: string[], emotion: EmotionVector): Promise<string[]> {
   try {
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash",
-      systemInstruction: DESCRIPTION_PROMPT,
-      generationConfig: { responseMimeType: "application/json" },
-    });
     const emotionSummary = [
       emotion.joy > 0.6 ? "기쁨" : emotion.sadness > 0.6 ? "우울함" : "",
       emotion.stress > 0.6 ? "스트레스" : "",
@@ -73,14 +68,14 @@ async function generateDescriptions(names: string[], emotion: EmotionVector): Pr
     ].filter(Boolean).join(", ") || "평온함";
 
     const prompt = `고객 감정: ${emotionSummary} (세부: ${JSON.stringify(emotion)})\n\n추천 칵테일 목록 (${names.length}개):\n${names.map((n, i) => `${i + 1}. ${n}`).join("\n")}\n\n위 ${names.length}개 칵테일 각각에 대해 2~3문장 추천 설명을 JSON 배열로 반환하세요.`;
-    const result = await model.generateContent(prompt);
-    const parsed = parseGeminiJson<unknown>(result.response.text());
+    const raw = await generateJsonText(prompt, DESCRIPTION_PROMPT);
+    const parsed = parseGeminiJson<unknown>(raw);
 
     if (Array.isArray(parsed)) {
       // 길이가 다를 경우 부족한 부분은 fallback으로 채움
       return names.map((n, i) => {
-        const d = parsed[i];
-        return typeof d === "string" && d.trim() ? d.trim() : fallbackDesc(n);
+        const d = typeof parsed[i] === "string" ? sanitizeLlmText(parsed[i], 400) : "";
+        return d ? d : fallbackDesc(n);
       });
     }
     return names.map(fallbackDesc);

@@ -1,4 +1,4 @@
-import { genAI, parseGeminiJson } from "@/shared/lib/geminiClient";
+import { generateJsonText, parseGeminiJson, clampText, sanitizeLlmText } from "@/shared/lib/geminiClient";
 
 const RECIPE_PROMPT = `당신은 IBA 공인 바텐더입니다. 칵테일 정보를 받아 정확하고 실용적인 제조 단계를 작성하세요.
 
@@ -92,28 +92,29 @@ function buildFallbackSteps(input: RecipeInput): string[] {
 
 export async function generateRecipeSteps(input: RecipeInput): Promise<string[]> {
   try {
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash",
-      systemInstruction: RECIPE_PROMPT,
-      generationConfig: { responseMimeType: "application/json" },
-    });
-
     const ingDesc = input.ingredients
-      .map(i => `${i.name} ${i.amount ?? "적당량"}`)
+      .slice(0, 20)
+      .map(i => `${clampText(i.name, 50)} ${clampText(i.amount ?? "적당량", 30)}`)
       .join(", ");
 
-    const prompt = `칵테일명: ${input.name}
+    const prompt = `칵테일명: ${clampText(input.name, 60)}
 제조법: ${input.method ?? "shaking"}
 잔: ${input.glassType ?? "rocks"}
 재료: ${ingDesc}
 
 위 칵테일의 제조 단계를 JSON 배열로 반환하세요.`;
 
-    const result = await model.generateContent(prompt);
-    const parsed = parseGeminiJson<unknown>(result.response.text());
+    const raw = await generateJsonText(prompt, RECIPE_PROMPT);
+    const parsed = parseGeminiJson<unknown>(raw);
 
-    if (Array.isArray(parsed) && parsed.length >= 3 && parsed.every(s => typeof s === "string")) {
-      return parsed as string[];
+    if (Array.isArray(parsed)) {
+      // DB에 저장되어 모든 사용자에게 노출되므로 평문 문자열만, 최대 12단계/300자
+      const steps = parsed
+        .filter((s): s is string => typeof s === "string")
+        .map((s) => sanitizeLlmText(s, 300))
+        .filter((s) => s.length > 0)
+        .slice(0, 12);
+      if (steps.length >= 3) return steps;
     }
     return buildFallbackSteps(input);
   } catch (e) {
