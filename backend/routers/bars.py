@@ -6,7 +6,6 @@ from services.google_maps import search_nearby_bars, search_bars_by_text, get_pl
 from services.gemini import analyze_bar
 from services.database import upsert_bar, get_bars
 from services.naver_blog import search_naver_blog_reviews
-from services.instagram import search_instagram_posts
 
 router = APIRouter(prefix="/bars", tags=["bars"], dependencies=[Depends(require_internal_secret)])
 
@@ -43,15 +42,15 @@ async def process_place(place: dict) -> dict | None:
     async def _no_reviews() -> list[str]:
         return []
 
-    google_reviews, blog_snippets, insta_captions = await asyncio.gather(
+    # 인스타그램 수집은 Instagram 측 차단(404)으로 항상 실패해 지연만 유발하므로 제외
+    google_reviews, blog_snippets = await asyncio.gather(
         get_place_reviews(place_id) if place_id else _no_reviews(),
         search_naver_blog_reviews(base["name"], area),
-        search_instagram_posts(base["name"], area),
     )
 
     analysis = await analyze_bar(
         base["name"], base["address"],
-        google_reviews, blog_snippets, insta_captions,
+        google_reviews, blog_snippets,
     )
 
     from datetime import datetime, timezone
