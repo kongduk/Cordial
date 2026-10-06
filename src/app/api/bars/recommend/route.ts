@@ -220,7 +220,8 @@ export async function POST(req: NextRequest) {
 
     // 파이프라인 수집 반경과 동일한 바운딩박스로 쿼리
     const delta = NEARBY_RADIUS_M / 111000;
-    const lngDelta = NEARBY_RADIUS_M / (111000 * Math.cos((lat * Math.PI) / 180));
+    const cosLat = Math.cos((lat * Math.PI) / 180);
+    const lngDelta = cosLat > 0.001 ? NEARBY_RADIUS_M / (111000 * cosLat) : NEARBY_RADIUS_M / 111000;
     let bars = await prisma.bar.findMany({
       where: {
         latitude: { gte: lat - delta, lte: lat + delta },

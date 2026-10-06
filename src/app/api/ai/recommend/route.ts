@@ -4,7 +4,7 @@ import { prisma } from "@/shared/lib/prisma";
 import type { EmotionVector } from "@/shared/types";
 import { checkSameOrigin } from "@/shared/lib/internalAuth";
 import { getAuthUser } from "@/server/auth/getUser";
-import { checkRateLimit, consumeAnonAiBudget } from "@/shared/lib/rateLimit";
+import { checkRateLimit, consumeAiBudget } from "@/shared/lib/rateLimit";
 import { readJsonBody } from "@/shared/lib/readJson";
 
 function isValidEmotionVector(v: unknown): v is EmotionVector {
@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
         ? undefined
         : capacityFromBody;
 
-    const budgetError = await consumeAnonAiBudget(!authUser);
+    const budgetError = await consumeAiBudget(req, !authUser);
     if (budgetError) return budgetError;
 
     const recommendations = await recommendCocktails({ emotionVector, userId, drinkingCapacity });

@@ -53,6 +53,8 @@ const handler = NextAuth({
         const ip = getClientIpKey({ headers: { get: headerValue } });
         if (!(await allowByKey("login-ip", `ip:${ip}`))) return null;
         if (!(await allowByKey("login", `email:${email}|net:${ip}`))) return null;
+        // 분산 IP 에서 단일 계정을 노리는 공격 방어: 이메일 단독 전역 상한
+        if (!(await allowByKey("login-email-global", `email:${email}`))) return null;
 
         const user = await prisma.user.findFirst({
           where: { email: { equals: email, mode: "insensitive" } },

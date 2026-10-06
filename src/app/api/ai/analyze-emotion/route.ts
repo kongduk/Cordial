@@ -3,7 +3,7 @@ import { analyzeEmotion } from "@/server/ai/analyzeEmotion";
 import { prisma } from "@/shared/lib/prisma";
 import { checkSameOrigin } from "@/shared/lib/internalAuth";
 import { getAuthUser } from "@/server/auth/getUser";
-import { checkRateLimit, consumeAnonAiBudget } from "@/shared/lib/rateLimit";
+import { checkRateLimit, consumeAiBudget } from "@/shared/lib/rateLimit";
 import { readJsonBody } from "@/shared/lib/readJson";
 
 export async function POST(req: NextRequest) {
@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "텍스트가 너무 깁니다." }, { status: 400 });
     }
 
-    const budgetError = await consumeAnonAiBudget(!authUser);
+    const budgetError = await consumeAiBudget(req, !authUser);
     if (budgetError) return budgetError;
 
     const emotion = await analyzeEmotion(text);
